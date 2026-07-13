@@ -1,0 +1,13 @@
+{
+  "name": "kindle-shelf",
+  "version": "0.1.0",
+  "description": "Which Kindle books (owned + Kindle Unlimited) have I already read, by author?",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke"
+  },
+  "devDependencies": {
+    "electron": "^38"
+  }
+}

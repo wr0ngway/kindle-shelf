@@ -2,3 +2,4 @@ browser-profile/
 data/
 __pycache__/
 .venv/
+node_modules/
