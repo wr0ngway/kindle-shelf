@@ -90,22 +90,19 @@ async function fetchKuBorrows(progress) {
   const csrf = m[1]
 
   const items = []
+  const batchSize = 100
   for (let batch = 0; ; batch++) {
     const param = {
-      GetContentOwnershipData: {
-        contentType: 'Ebook',
-        contentCategoryReference: 'booksAll',
-        itemStatusList: ['Active', 'Expired'],
-        originTypes: ['KindleUnlimited'],
-        showSharedContent: true,
-        fetchCriteria: {
+      param: {
+        OwnershipData: {
           sortOrder: 'DESCENDING',
           sortIndex: 'DATE',
-          startIndex: batch * 100,
-          batchSize: 100,
-          totalContentCount: -1,
+          startIndex: batch * batchSize,
+          batchSize,
+          contentType: 'Ebook',
+          itemStatus: ['Active', 'Expired'],
+          originType: ['KindleUnlimited'],
         },
-        surfaceType: 'LargeDesktop',
       },
     }
     const body = new URLSearchParams({ data: JSON.stringify(param), csrfToken: csrf }).toString()
@@ -115,15 +112,27 @@ async function fetchKuBorrows(progress) {
       body,
     })
     saveRaw(`ku_batch_${batch}.json`, JSON.stringify(payload, null, 2))
-    const data = payload.GetContentOwnershipData || {}
+    const data = payload.OwnershipData || {}
+    if (data.success === false) throw new Error(`OwnershipData request failed — see raw/ku_batch_${batch}.json`)
     const got = data.items || []
     items.push(...got)
     progress(`Kindle Unlimited: ${items.length} borrows…`)
-    if (!got.length || items.length >= (data.numberOfItems || 0)) return items
+    if (!got.length || !data.hasMoreItems) return items
   }
 }
 
-const cleanAuthor = (a) => a.replace(/:$/, '').trim()
+function decodeEntities(s) {
+  return String(s ?? '')
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+const cleanAuthor = (a) => decodeEntities(a).replace(/:$/, '').trim()
 
 function splitAuthors(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(cleanAuthor).filter(Boolean)
@@ -131,22 +140,30 @@ function splitAuthors(value) {
   return []
 }
 
+function kuAuthors(it) {
+  const fromDetails = (it.bookProducerDetails || [])
+    .filter((d) => d.role === 'author')
+    .map((d) => cleanAuthor(d.name))
+    .filter(Boolean)
+  return fromDetails.length ? fromDetails : splitAuthors(it.authors)
+}
+
 function mergeBooks(owned, ku) {
   const books = new Map()
   for (const it of owned) {
     books.set(it.asin, {
       asin: it.asin,
-      title: it.title || '(untitled)',
+      title: decodeEntities(it.title) || '(untitled)',
       authors: splitAuthors(it.authors),
       sources: [it.originType === 'KINDLE_UNLIMITED' ? 'ku-active' : 'owned'],
     })
   }
   for (const it of ku) {
-    const status = it.isDeleted || it.status === 'Expired' ? 'ku-returned' : 'ku-active'
+    const status = it.lendingStatus === 'OnLoan' ? 'ku-active' : 'ku-returned'
     const cur = books.get(it.asin) || {
       asin: it.asin,
-      title: it.title || '(untitled)',
-      authors: splitAuthors(it.authors),
+      title: decodeEntities(it.title) || '(untitled)',
+      authors: kuAuthors(it),
       sources: [],
     }
     if (!cur.sources.includes(status)) cur.sources.push(status)
@@ -157,6 +174,7 @@ function mergeBooks(owned, ku) {
 }
 
 function send(state) {
+  console.log('[sync]', JSON.stringify(state).slice(0, 300))
   if (win && !win.isDestroyed()) win.webContents.send('sync-state', state)
 }
 
