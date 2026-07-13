@@ -12,6 +12,10 @@ through the app's own Chromium network stack:
 - **KU borrows (current + returned)** — the Content & Devices (`/hz/mycd`)
   ajax endpoint, filtered to KindleUnlimited.
 
+Catalog data (series contents, author catalogs, product details) comes from
+Amazon HTML pages fetched through a hidden window in the same session —
+a bare HTTP client trips Amazon's bot verification; a real renderer doesn't.
+
 ## Usage
 
 ```sh
@@ -22,18 +26,34 @@ npm start
   embedded window. It closes itself once the session works, then syncs.
 - Every launch auto-syncs, so data stays fresh; **↻ Refresh** re-syncs on
   demand mid-session.
-- Type an author (or title) in the search box — matches show badges for
-  *Owned*, *Kindle Unlimited* (active borrow), or *KU · returned*.
 
-Data and the Amazon session live under Electron's userData directory
-(`~/Library/Application Support/kindle-shelf/`): `books.json`, `raw/` (raw API
-responses, for debugging), and the session partition. Delete the directory to
-log out / reset.
+**Library tab** — search by author/title; *Group by series* toggle
+(series inferred from titles, refined by product metadata as it's cached).
+Badges: *Owned*, *Kindle Unlimited* (active borrow), *KU · returned*,
+reading progress.
 
-## CLI (legacy)
+**Author drill-down** — click any author name to fetch their full Kindle
+catalog, grouped by series, with read/unread badges. Filters: *Unread only*,
+*Released only*. If the search mixes several same-named authors, chips let
+you pick the one you meant.
 
-`kindle.py` is the original Playwright CLI version of the same sync
-(`uv run kindle.py login|sync|author`). The app supersedes it.
+**Continue Series tab** — every series you've read, most recently acquired
+first. *Check for new books* (or *Scan unchecked series*) fetches the series
+page and lists unread volumes — with *Released only* on by default so
+pre-orders don't clutter the list. Results cache for a week; ↻ re-checks.
+
+**Book details** — click any book row: cover, synopsis, rating, reviews,
+release date, and **📖 Read with Kindle** (opens the book in an embedded
+Kindle Cloud Reader window) or **View on Amazon**.
+
+Data, caches, and the Amazon session live under
+`~/Library/Application Support/kindle-shelf/` (`books.json`, `cache/`,
+`raw/` for debugging). Delete the directory to log out / reset.
+
+## Dev helpers
+
+`probe.js` and `test-parse.js` run one-off fetches/parses against the live
+session (`npx electron probe.js`) — useful when Amazon changes page shapes.
 
 ## Caveats
 
