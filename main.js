@@ -113,7 +113,9 @@ async function getMycdCsrf(force = false) {
   return mycdCsrf
 }
 
-async function fetchKuBorrows(progress) {
+// All ebooks Amazon knows about (purchases + KU borrows incl. returned),
+// with per-item readStatus — the record behind "Mark as read".
+async function fetchMycdBooks(progress) {
   const csrf = await getMycdCsrf(true)
 
   const items = []
@@ -128,7 +130,6 @@ async function fetchKuBorrows(progress) {
           batchSize,
           contentType: 'Ebook',
           itemStatus: ['Active', 'Expired'],
-          originType: ['KindleUnlimited'],
         },
       },
     }
@@ -143,7 +144,7 @@ async function fetchKuBorrows(progress) {
     if (data.success === false) throw new Error(`OwnershipData request failed — see raw/ku_batch_${batch}.json`)
     const got = data.items || []
     items.push(...got)
-    progress(`Kindle Unlimited: ${items.length} borrows…`)
+    progress(`Amazon records: ${items.length} books…`)
     if (!got.length || !data.hasMoreItems) return items
   }
 }
@@ -156,7 +157,11 @@ function kuAuthors(it) {
   return fromDetails.length ? fromDetails : splitAuthors(it.authors)
 }
 
-function mergeBooks(owned, ku) {
+function mergeBooks(owned, mycdItems) {
+  const ku = mycdItems.filter((it) => it.originType === 'Ku' || it.lendingType === 'KU')
+  const readStatusByAsin = new Map(
+    mycdItems.filter((it) => it.originType !== 'Sample').map((it) => [it.asin, it.readStatus]))
+
   const books = new Map()
   owned.forEach((it, i) => {
     books.set(it.asin, {
@@ -187,6 +192,7 @@ function mergeBooks(owned, ku) {
   })
   const list = [...books.values()].sort((a, b) => a.title.localeCompare(b.title))
   for (const b of list) {
+    b.amazonReadStatus = readStatusByAsin.get(b.asin) || null
     const g = guessSeries(b.title)
     if (g) {
       b.seriesGuess = g.name
@@ -260,11 +266,43 @@ async function updateAmazonReadState(asin, read, retry = true) {
   }
 }
 
+// Effective read status. Amazon is the source of truth for books it knows
+// about; the local override only covers what Amazon can't represent:
+// books never acquired there, and the explicit-unread state (Amazon's
+// "unread" is just UNKNOWN, indistinguishable from never-marked).
+function effectiveRead(inLibrary, amazonRead, override) {
+  if (!inLibrary) return override === 'read'
+  if (amazonRead) return true
+  return override !== 'unread'
+}
+
 function annotateBooks(data) {
   if (!data) return data
   const ov = loadOverrides()
-  for (const b of data.books || []) b.readOverride = ov[b.asin] || null
+  for (const b of data.books || []) {
+    b.readOverride = ov[b.asin] || null
+    b.amazonRead = b.amazonReadStatus === 'READ'
+    b.read = effectiveRead(true, b.amazonRead, b.readOverride)
+  }
   return data
+}
+
+// After each sync, drop local overrides that Amazon's record supersedes:
+// a READ mark upstream beats any local mark, and a 'read' override on a
+// library book is redundant (presence already means read).
+function pruneOverrides(books) {
+  const ov = loadOverrides()
+  const byAsin = new Map(books.map((b) => [b.asin, b]))
+  let changed = false
+  for (const [asin, value] of Object.entries(ov)) {
+    const b = byAsin.get(asin)
+    if (!b) continue
+    if (b.amazonReadStatus === 'READ' || value === 'read') {
+      delete ov[asin]
+      changed = true
+    }
+  }
+  if (changed) fs.writeFileSync(overridesFile(), JSON.stringify(ov, null, 1))
 }
 
 async function doSync() {
@@ -273,13 +311,18 @@ async function doSync() {
   send({ state: 'syncing', detail: 'starting…' })
   try {
     const owned = await fetchOwned((d) => send({ state: 'syncing', detail: d }))
-    const ku = await fetchKuBorrows((d) => send({ state: 'syncing', detail: d }))
+    const mycdItems = await fetchMycdBooks((d) => send({ state: 'syncing', detail: d }))
+    const books = mergeBooks(owned, mycdItems)
     const payload = {
       syncedAt: new Date().toISOString(),
-      counts: { owned: owned.length, ku: ku.length },
-      books: mergeBooks(owned, ku),
+      counts: {
+        owned: owned.length,
+        ku: books.filter((b) => b.sources.some((s) => s.startsWith('ku'))).length,
+      },
+      books,
     }
     fs.writeFileSync(dataFile(), JSON.stringify(payload, null, 1))
+    pruneOverrides(books)
     send({ state: 'done', ...annotateBooks(payload) })
   } catch (e) {
     if (e.code === 'NOT_LOGGED_IN') send({ state: 'needs-login' })
@@ -338,11 +381,12 @@ function computeSeriesGroups() {
 // Re-annotate cached series volumes against the *current* library + overrides.
 function annotateVolumes(check) {
   if (!check || !check.volumes) return check
-  const have = new Set((loadBooks()?.books || []).map((b) => b.asin))
+  const byAsin = new Map((loadBooks()?.books || []).map((b) => [b.asin, b]))
   const ov = loadOverrides()
   for (const v of check.volumes) {
-    v.inLibrary = v.asin ? have.has(v.asin) || v.purchased : v.purchased
-    v.read = ov[v.asin] ? ov[v.asin] === 'read' : v.inLibrary
+    const mine = v.asin ? byAsin.get(v.asin) : null
+    v.inLibrary = Boolean(mine) || v.purchased
+    v.read = effectiveRead(v.inLibrary, mine?.amazonReadStatus === 'READ', ov[v.asin])
   }
   return check
 }
@@ -387,7 +431,7 @@ function annotateCatalog(result) {
     const mine = byAsin.get(c.asin)
     c.inLibrary = Boolean(mine)
     c.mySources = mine ? mine.sources : []
-    c.read = ov[c.asin] ? ov[c.asin] === 'read' : c.inLibrary
+    c.read = effectiveRead(c.inLibrary, mine?.amazonReadStatus === 'READ', ov[c.asin])
   }
   return result
 }
@@ -462,14 +506,37 @@ function createWindow() {
 ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
 ipcMain.handle('override:set', async (_e, asin, value) => {
   if (![null, 'read', 'unread'].includes(value)) throw new Error('bad override value')
-  setOverride(asin, value)
-  if (!value) return { amazonSynced: false }
-  try {
-    await updateAmazonReadState(asin, value === 'read')
-    return { amazonSynced: true }
-  } catch (e) {
-    return { amazonSynced: false, amazonError: String(e.message || e) }
+  const data = loadBooks()
+  const book = (data?.books || []).find((b) => b.asin === asin) || null
+  let amazonSynced = false
+  let amazonError = null
+
+  if (value) {
+    try {
+      await updateAmazonReadState(asin, value === 'read')
+      amazonSynced = true
+      if (book) {
+        // Reflect Amazon's new state locally without waiting for a re-sync.
+        book.amazonReadStatus = value === 'read' ? 'READ' : 'UNKNOWN'
+        fs.writeFileSync(dataFile(), JSON.stringify(data, null, 1))
+      }
+    } catch (e) {
+      amazonError = String(e.message || e)
+    }
   }
+
+  // Store locally only what Amazon's record can't carry.
+  if (value === 'read') {
+    // Library book successfully marked upstream: Amazon holds the truth.
+    setOverride(asin, book && amazonSynced ? null : 'read')
+  } else if (value === 'unread') {
+    // Amazon has no explicit unread state — keep it locally for library
+    // books; for non-library books unread just clears the local read mark.
+    setOverride(asin, book ? 'unread' : null)
+  } else {
+    setOverride(asin, null)
+  }
+  return { amazonSynced, amazonError }
 })
 ipcMain.handle('sync', () => { doSync() })
 ipcMain.handle('login:open', () => { openLogin() })
@@ -482,7 +549,12 @@ ipcMain.handle('details:get', async (_e, asin, opts) => {
   const data = loadBooks()
   const book = (data?.books || []).find((b) => b.asin === asin) || null
   const ov = loadOverrides()[asin] || null
-  return { meta, book, override: ov, read: ov ? ov === 'read' : Boolean(book) }
+  return {
+    meta,
+    book,
+    override: ov,
+    read: effectiveRead(Boolean(book), book?.amazonReadStatus === 'READ', ov),
+  }
 })
 ipcMain.handle('series:groups', () => computeSeriesGroups())
 ipcMain.handle('series:check', (_e, key, opts) => checkSeries(key, opts || {}))
