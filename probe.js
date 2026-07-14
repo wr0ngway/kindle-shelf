@@ -1,45 +1,34 @@
 // Dev-only endpoint probe: reuses the app's Amazon session to test candidate
-// endpoints for series/catalog metadata. Run: npx electron probe.js
-const { app, session, net } = require('electron')
+// endpoints. Run: npx electron probe.js (app must not be running)
+const { app, session } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { createAmazon } = require('./lib/amazon')
 
 app.setPath('userData', path.join(app.getPath('appData'), 'kindle-shelf'))
 const OUT = path.join(__dirname, 'probe-out')
-const UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
-
-function request(ses, url, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = net.request({ url, session: ses, useSessionCookies: true })
-    req.setHeader('User-Agent', UA)
-    for (const [k, v] of Object.entries(headers)) req.setHeader(k, v)
-    req.on('response', (res) => {
-      const chunks = []
-      res.on('data', (c) => chunks.push(c))
-      res.on('end', () =>
-        resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }))
-      res.on('error', reject)
-    })
-    req.on('error', reject)
-    req.end()
-  })
-}
 
 app.whenReady().then(async () => {
   fs.mkdirSync(OUT, { recursive: true })
-  const ses = session.fromPartition('persist:amazon')
-  const probes = [
-    ['series_page.html', 'https://www.amazon.com/dp/B0DXQ862WJ'],
-  ]
-  for (const [name, url] of probes) {
-    try {
-      const res = await request(ses, url)
-      fs.writeFileSync(path.join(OUT, name), res.text)
-      console.log(name, res.status, `${res.text.length} bytes`)
-    } catch (e) {
-      console.log(name, 'ERROR', String(e))
-    }
+  const amazon = createAmazon({
+    getSession: () => session.fromPartition('persist:amazon'),
+    saveRaw: () => {},
+    log: console.log,
+  })
+  const res = await amazon.throttled(
+    'https://www.amazon.com/hz/mycd/digital-console/contentlist/booksAll/dateDsc')
+  fs.writeFileSync(path.join(OUT, 'mycd_console.html'), res.text)
+  console.log('mycd_console.html', res.status, res.text.length, 'bytes')
+
+  // Pull the JS bundles the console loads — endpoint names live in them.
+  const scripts = [...res.text.matchAll(/src="(https:\/\/[^"]+\.js[^"]*)"/g)].map((m) => m[1])
+  console.log('scripts found:', scripts.length)
+  let i = 0
+  for (const src of scripts) {
+    if (!/mycd|digital|console|content/i.test(src)) continue
+    const r = await amazon.rawRequest(src)
+    fs.writeFileSync(path.join(OUT, `bundle_${i++}.js`), r.text)
+    console.log('bundle', src.slice(0, 120), r.text.length)
   }
   app.exit(0)
 })

@@ -53,10 +53,14 @@ function authorLink(name) {
   return a
 }
 
-// Toggle a manual read/unread override, then refresh whatever's on screen.
+// Toggle a manual read/unread override (also pushed to Amazon's own
+// read-state record), then refresh whatever's on screen.
 async function toggleRead(asin, currentlyRead) {
-  await window.kindle.setOverride(asin, currentlyRead ? 'unread' : 'read')
+  const res = await window.kindle.setOverride(asin, currentlyRead ? 'unread' : 'read')
   await afterOverride()
+  setStatus(res.amazonSynced
+    ? `Marked ${currentlyRead ? 'unread' : 'read'} · synced to Amazon · ${fmtSynced()}`
+    : `Marked ${currentlyRead ? 'unread' : 'read'} locally (Amazon: ${res.amazonError || 'not synced'}) · ${fmtSynced()}`)
 }
 
 async function afterOverride() {

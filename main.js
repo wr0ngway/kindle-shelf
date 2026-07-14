@@ -100,14 +100,21 @@ async function fetchOwned(progress) {
   }
 }
 
-async function fetchKuBorrows(progress) {
+let mycdCsrf = null
+async function getMycdCsrf(force = false) {
+  if (mycdCsrf && !force) return mycdCsrf
   const page = await amazon.rawRequest(MYCD_URL)
   const m = page.text.match(/csrfToken\s*[=:]\s*["']([^"']+)["']/)
   if (!m) {
     saveRaw('mycd_page.html', page.text)
     throw notLoggedIn()
   }
-  const csrf = m[1]
+  mycdCsrf = m[1]
+  return mycdCsrf
+}
+
+async function fetchKuBorrows(progress) {
+  const csrf = await getMycdCsrf(true)
 
   const items = []
   const batchSize = 100
@@ -220,6 +227,39 @@ function setOverride(asin, value) {
   fs.writeFileSync(overridesFile(), JSON.stringify(ov, null, 1))
   return ov
 }
+// Push a read/unread mark to Amazon itself (same record the Kindle apps and
+// Content & Devices use). Throws if Amazon rejects it.
+async function updateAmazonReadState(asin, read, retry = true) {
+  const csrf = await getMycdCsrf()
+  const body = new URLSearchParams({
+    data: JSON.stringify({
+      param: {
+        UpdateReadState: {
+          asinDetails: { [asin]: { category: 'KindleEBook' } },
+          operation: read ? 'MarkAsRead' : 'MarkAsUnread',
+        },
+      },
+    }),
+    csrfToken: csrf,
+    clientId: 'MYCD_WebService',
+  }).toString()
+  const payload = await fetchJson(AJAX_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  const r = payload.UpdateReadState || {}
+  if (!(r.success && r.resultMap && r.resultMap[asin])) {
+    if (retry) {
+      // Stale csrf token is the common transient failure — refresh once.
+      await getMycdCsrf(true)
+      return updateAmazonReadState(asin, read, false)
+    }
+    saveRaw('update_read_state.json', JSON.stringify(payload, null, 2))
+    throw new Error('Amazon rejected the read-state update (book may not be in your Amazon library)')
+  }
+}
+
 function annotateBooks(data) {
   if (!data) return data
   const ov = loadOverrides()
@@ -420,9 +460,16 @@ function createWindow() {
 // ---------- ipc ----------
 
 ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
-ipcMain.handle('override:set', (_e, asin, value) => {
+ipcMain.handle('override:set', async (_e, asin, value) => {
   if (![null, 'read', 'unread'].includes(value)) throw new Error('bad override value')
   setOverride(asin, value)
+  if (!value) return { amazonSynced: false }
+  try {
+    await updateAmazonReadState(asin, value === 'read')
+    return { amazonSynced: true }
+  } catch (e) {
+    return { amazonSynced: false, amazonError: String(e.message || e) }
+  }
 })
 ipcMain.handle('sync', () => { doSync() })
 ipcMain.handle('login:open', () => { openLogin() })
