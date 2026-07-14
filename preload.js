@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('kindle', {
   seriesGroups: () => ipcRenderer.invoke('series:groups'),
   seriesCheck: (key, opts) => ipcRenderer.invoke('series:check', key, opts),
   authorCatalog: (name, opts) => ipcRenderer.invoke('author:catalog', name, opts),
+  setOverride: (asin, value) => ipcRenderer.invoke('override:set', asin, value),
   onSyncState: (cb) => ipcRenderer.on('sync-state', (_e, s) => cb(s)),
 })

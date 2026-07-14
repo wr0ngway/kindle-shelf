@@ -53,6 +53,39 @@ function authorLink(name) {
   return a
 }
 
+// Toggle a manual read/unread override, then refresh whatever's on screen.
+async function toggleRead(asin, currentlyRead) {
+  await window.kindle.setOverride(asin, currentlyRead ? 'unread' : 'read')
+  await afterOverride()
+}
+
+async function afterOverride() {
+  const data = await window.kindle.getBooks()
+  if (data) {
+    state.books = data.books || []
+    state.syncedAt = data.syncedAt
+  }
+  if (state.seriesGroups) state.seriesGroups = await window.kindle.seriesGroups()
+  if (state.author) {
+    const cat = await window.kindle.authorCatalog(state.author.name)
+    state.author.items = cat.items
+  }
+  if (state.view === 'series') renderSeries()
+  else if (state.view === 'author') renderAuthor()
+  renderLibrary()
+}
+
+function markBtn(asin, read) {
+  const b = el('button', 'mark-btn', read ? '↺ unread' : '✓ read')
+  b.title = read ? 'Mark as not read' : 'Mark as read'
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    b.disabled = true
+    await toggleRead(asin, read)
+  })
+  return b
+}
+
 function bookRow(b, { showAuthors = true, extraBadges = [] } = {}) {
   const li = el('div', 'row')
   li.append(el('span', 'title', b.title))
@@ -69,9 +102,58 @@ function bookRow(b, { showAuthors = true, extraBadges = [] } = {}) {
   if (b.percentageRead > 0 && b.percentageRead < 100)
     li.append(badge('progress', `${b.percentageRead}% read`))
   for (const s of b.sources || []) li.append(badge(s))
+  if (b.readOverride === 'unread') li.append(badge('unread', 'Marked unread'))
   for (const x of extraBadges) li.append(x)
   li.addEventListener('click', () => openDetails(b.asin))
   return li
+}
+
+async function ensureSeriesGroups() {
+  if (!state.seriesGroups) state.seriesGroups = await window.kindle.seriesGroups()
+  return state.seriesGroups
+}
+
+function nextUnread(check, releasedOnly) {
+  if (!check || check.unresolved) return null
+  return (check.volumes || [])
+    .filter((v) => !v.read && (!releasedOnly || v.released))
+    .sort((a, b) => a.position - b.position)
+}
+
+// Compact row for an unread volume of a series (used in Library + Series tabs).
+function volumeRow(v) {
+  const row = el('div', 'row next-row')
+  row.append(el('span', 'title', `#${v.position}  ${v.title}`))
+  row.append(el('span', 'authors',
+    v.released ? (v.releaseDate ? `released ${v.releaseDate}` : '') : `releases ${v.releaseDate || 'TBA'}`))
+  if (!v.released) row.append(badge('preorder'))
+  if (v.kuAvailable) row.append(badge('ku-avail', 'On KU'))
+  if (v.asin) {
+    row.append(markBtn(v.asin, false))
+    row.addEventListener('click', () => openDetails(v.asin))
+  }
+  return row
+}
+
+async function checkOne(g, opts) {
+  try {
+    g.check = await window.kindle.seriesCheck(g.key, opts)
+  } catch (e) {
+    g.check = null
+    console.error('series check failed', g.name, e)
+  }
+}
+
+function checkButton(g, rerender) {
+  const btn = el('button', null, 'Check for new books')
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    btn.textContent = 'Checking…'
+    btn.disabled = true
+    await checkOne(g)
+    rerender()
+  })
+  return btn
 }
 
 // ---------- tabs ----------
@@ -80,9 +162,8 @@ function showView(name) {
   state.view = name
   for (const t of document.querySelectorAll('nav .tab'))
     t.classList.toggle('active', t.dataset.view === name)
-  $('view-library').classList.toggle('hidden', name !== 'library' && name !== 'author')
+  $('view-library').classList.toggle('hidden', name !== 'library')
   $('view-author').classList.toggle('hidden', name !== 'author')
-  if (name === 'author') $('view-library').classList.add('hidden')
   $('view-series').classList.toggle('hidden', name !== 'series')
   if (name === 'series') loadSeriesView()
 }
@@ -92,51 +173,93 @@ document.querySelectorAll('nav .tab').forEach((t) =>
 
 // ---------- library view ----------
 
-function renderLibrary() {
+function libraryMatches() {
   const q = $('search').value.trim().toLowerCase()
-  const matches = !q
-    ? state.books
-    : state.books.filter(
-        (b) =>
-          (b.authors || []).some((a) => a.toLowerCase().includes(q)) ||
-          b.title.toLowerCase().includes(q))
+  if (!q) return state.books
+  return state.books.filter(
+    (b) =>
+      (b.authors || []).some((a) => a.toLowerCase().includes(q)) ||
+      b.title.toLowerCase().includes(q))
+}
 
+function renderLibrary() {
+  const grouped = $('group-series').checked
+  for (const label of document.querySelectorAll('.needs-grouping')) {
+    label.style.opacity = grouped ? 1 : 0.45
+    label.querySelector('input').disabled = !grouped
+  }
+  const matches = libraryMatches()
+  const q = $('search').value.trim()
   $('lib-summary').textContent = q
-    ? `${matches.length} of ${state.books.length} books match “${$('search').value.trim()}”`
+    ? `${matches.length} of ${state.books.length} books match “${q}”`
     : `${state.books.length} books`
 
   const wrap = $('lib-results')
   wrap.replaceChildren()
+  if (grouped) renderLibraryGrouped(wrap, matches)
+  else {
+    for (const b of matches.slice(0, MAX_ROWS)) wrap.append(bookRow(b))
+    if (matches.length > MAX_ROWS)
+      wrap.append(el('div', 'summary', `…and ${matches.length - MAX_ROWS} more — narrow the search.`))
+  }
+}
 
-  if ($('group-series').checked) {
-    const groups = new Map()
-    const solo = []
-    for (const b of matches) {
-      if (b.seriesKey) {
-        const g = groups.get(b.seriesKey) || { name: b.seriesGuess, books: [] }
-        g.books.push(b)
-        groups.set(b.seriesKey, g)
-      } else solo.push(b)
+function renderLibraryGrouped(wrap, matches) {
+  const groups = state.seriesGroups
+  if (!groups) {
+    wrap.append(el('div', 'summary', 'Computing series…'))
+    ensureSeriesGroups().then(renderLibrary)
+    return
+  }
+  const unreadOnly = $('lib-unread-only').checked
+  const releasedOnly = $('lib-released-only').checked
+  const matchAsins = new Set(matches.map((b) => b.asin))
+  const byAsin = new Map(state.books.map((b) => [b.asin, b]))
+  const groupedAsins = new Set()
+  for (const g of groups) for (const b of g.books) groupedAsins.add(b.asin)
+
+  const sorted = [...groups].sort((a, b) => a.name.localeCompare(b.name))
+  let shown = 0
+  for (const g of sorted) {
+    const members = g.books.map((b) => byAsin.get(b.asin)).filter(Boolean)
+    if (!members.some((b) => matchAsins.has(b.asin))) continue
+
+    const next = nextUnread(g.check, releasedOnly)
+    if (unreadOnly) {
+      if (g.check?.unresolved) continue
+      if (g.check && (!next || !next.length)) continue
     }
-    const sorted = [...groups.values()].sort((a, b) => a.name.localeCompare(b.name))
-    for (const g of sorted) {
-      const sec = el('div', 'series-group')
-      g.books.sort((x, y) => (x.seriesNum ?? 99) - (y.seriesNum ?? 99))
-      sec.append(el('h3', null, `${g.name} · ${g.books.length} book${g.books.length > 1 ? 's' : ''}`))
-      for (const b of g.books) sec.append(bookRow(b))
-      wrap.append(sec)
+
+    const sec = el('div', 'series-group')
+    const head = el('h3')
+    head.append(`${g.check?.name || g.name} · ${members.length} book${members.length > 1 ? 's' : ''}` +
+      (g.check?.total ? ` of ${g.check.total}` : ''))
+    if (!g.check) {
+      head.append(' ')
+      head.append(checkButton(g, renderLibrary))
     }
+    sec.append(head)
+    for (const b of members) sec.append(bookRow(b))
+    if (next && next.length) {
+      for (const v of next.slice(0, 4)) sec.append(volumeRow(v))
+      if (next.length > 4) sec.append(el('div', 'summary', `…and ${next.length - 4} more unread`))
+    } else if (g.check && !g.check.unresolved) {
+      sec.append(el('div', 'summary caught-up', '✓ caught up'))
+    }
+    wrap.append(sec)
+    shown++
+  }
+
+  if (!unreadOnly) {
+    const solo = matches.filter((b) => !groupedAsins.has(b.asin))
     if (solo.length) {
       const sec = el('div', 'series-group')
       sec.append(el('h3', null, `No series detected · ${solo.length}`))
       for (const b of solo.slice(0, MAX_ROWS)) sec.append(bookRow(b))
       wrap.append(sec)
     }
-  } else {
-    for (const b of matches.slice(0, MAX_ROWS)) wrap.append(bookRow(b))
-    if (matches.length > MAX_ROWS)
-      wrap.append(el('div', 'summary', `…and ${matches.length - MAX_ROWS} more — narrow the search.`))
   }
+  if (!shown) wrap.append(el('div', 'summary', 'No series match the current filters.'))
 }
 
 // ---------- author view ----------
@@ -184,13 +307,12 @@ function renderAuthor() {
   let list = items
   if (chip) list = list.filter((it) => (it.authors || []).includes(chip))
   if (releasedOnly) list = list.filter((it) => it.released)
-  if (unreadOnly) list = list.filter((it) => !it.inLibrary)
-  const read = list.filter((it) => it.inLibrary).length
+  if (unreadOnly) list = list.filter((it) => !it.read)
+  const read = list.filter((it) => it.read).length
   $('author-summary').textContent =
     `${list.length} books · ${read} read · ${list.length - read} unread` +
     (releasedOnly ? '' : ' · includes unreleased')
 
-  // Group by series
   const groups = new Map()
   const solo = []
   for (const it of list) {
@@ -205,7 +327,13 @@ function renderAuthor() {
   wrap.replaceChildren()
   const renderItem = (it) => {
     const extras = []
-    if (!it.inLibrary) extras.push(badge('unread'))
+    if (!it.read) {
+      extras.push(badge('unread'))
+      extras.push(markBtn(it.asin, false))
+    } else if (!it.inLibrary) {
+      extras.push(badge('progress', 'Marked read'))
+      extras.push(markBtn(it.asin, true))
+    }
     if (!it.released) extras.push(badge('preorder', it.releaseDate ? `Releases ${it.releaseDate}` : 'Not yet released'))
     if (it.kuAvailable) extras.push(badge('ku-avail', 'On KU'))
     const row = bookRow(
@@ -218,7 +346,7 @@ function renderAuthor() {
   for (const g of [...groups.values()].sort((a, b) => a.name.localeCompare(b.name))) {
     const sec = el('div', 'series-group')
     g.books.sort((x, y) => (x.series?.num ?? 99) - (y.series?.num ?? 99))
-    const readN = g.books.filter((b) => b.inLibrary).length
+    const readN = g.books.filter((b) => b.read).length
     sec.append(el('h3', null, `${g.name} · ${readN}/${g.total ?? g.books.length} read`))
     for (const b of g.books) sec.append(renderItem(b))
     wrap.append(sec)
@@ -240,18 +368,9 @@ $('author-released-only').addEventListener('change', renderAuthor)
 // ---------- continue-series view ----------
 
 async function loadSeriesView() {
-  if (!state.seriesGroups) {
-    $('series-summary').textContent = 'Computing series…'
-    state.seriesGroups = await window.kindle.seriesGroups()
-  }
+  $('series-summary').textContent = 'Computing series…'
+  await ensureSeriesGroups()
   renderSeries()
-}
-
-function nextUnread(check, releasedOnly) {
-  if (!check || check.unresolved) return null
-  return (check.volumes || [])
-    .filter((v) => !v.inLibrary && (!releasedOnly || v.released))
-    .sort((a, b) => a.position - b.position)
 }
 
 function renderSeries() {
@@ -279,15 +398,7 @@ function renderSeries() {
 
     const action = el('span', 'series-action')
     if (!g.check) {
-      const btn = el('button', null, 'Check for new books')
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation()
-        btn.textContent = 'Checking…'
-        btn.disabled = true
-        await checkOne(g)
-        renderSeries()
-      })
-      action.append(btn)
+      action.append(checkButton(g, renderSeries))
     } else if (g.check.unresolved) {
       action.append(el('span', 'summary', 'series page not found'))
     } else {
@@ -305,17 +416,7 @@ function renderSeries() {
     sec.append(head)
 
     if (next && next.length) {
-      for (const v of next.slice(0, 4)) {
-        const row = el('div', 'row next-row')
-        row.append(el('span', 'title', `#${v.position}  ${v.title}`))
-        const extras = el('span', 'authors',
-          v.released ? (v.releaseDate ? `released ${v.releaseDate}` : '') : `releases ${v.releaseDate || 'TBA'}`)
-        row.append(extras)
-        if (!v.released) row.append(badge('preorder'))
-        if (v.kuAvailable) row.append(badge('ku-avail', 'On KU'))
-        if (v.asin) row.addEventListener('click', () => openDetails(v.asin))
-        sec.append(row)
-      }
+      for (const v of next.slice(0, 4)) sec.append(volumeRow(v))
       if (next.length > 4) sec.append(el('div', 'summary', `…and ${next.length - 4} more unread`))
     } else if (g.check && !g.check.unresolved) {
       sec.append(el('div', 'summary caught-up', '✓ caught up'))
@@ -326,15 +427,6 @@ function renderSeries() {
   $('series-summary').textContent =
     `${groups.length} series · ${checked} checked · showing ${shown}` +
     (continuableOnly ? ' with unread books (or unchecked)' : '')
-}
-
-async function checkOne(g, opts) {
-  try {
-    g.check = await window.kindle.seriesCheck(g.key, opts)
-  } catch (e) {
-    g.check = null
-    $('series-summary').textContent = `Check failed for ${g.name}: ${e.message || e}`
-  }
 }
 
 $('series-scan').addEventListener('click', async () => {
@@ -369,9 +461,9 @@ async function openDetails(asin) {
   const body = $('details-body')
   panel.classList.remove('hidden')
   body.replaceChildren(el('div', 'summary', 'Loading details…'))
-  let meta, book
+  let meta, book, read
   try {
-    ;({ meta, book } = await window.kindle.getDetails(asin))
+    ;({ meta, book, read } = await window.kindle.getDetails(asin))
   } catch (e) {
     body.replaceChildren(el('div', 'summary', `Failed to load: ${e.message || e}`))
     return
@@ -401,7 +493,8 @@ async function openDetails(asin) {
 
   const badges = el('div', 'badges')
   for (const s of book?.sources || []) badges.append(badge(s))
-  if (!book) badges.append(badge('unread'))
+  if (!read) badges.append(badge('unread'))
+  else if (!book) badges.append(badge('progress', 'Marked read'))
   if (meta.kuAvailable) badges.append(badge('ku-avail', 'On KU'))
   if (meta.released === false) badges.append(badge('preorder'))
   body.append(badges)
@@ -409,13 +502,20 @@ async function openDetails(asin) {
   const actions = el('div', 'actions')
   const canRead = book && book.sources.some((s) => s === 'owned' || s === 'ku-active')
   if (canRead) {
-    const read = el('button', 'primary', '📖 Read with Kindle')
-    read.addEventListener('click', () => window.kindle.openReader(asin))
-    actions.append(read)
+    const readBtn = el('button', 'primary', '📖 Read with Kindle')
+    readBtn.addEventListener('click', () => window.kindle.openReader(asin))
+    actions.append(readBtn)
   }
   const amz = el('button', null, canRead ? 'View on Amazon' : meta.kuAvailable ? 'Borrow / view on Amazon' : 'View on Amazon')
   amz.addEventListener('click', () => window.kindle.openExternal(`https://www.amazon.com/dp/${asin}`))
   actions.append(amz)
+  const mark = el('button', null, read ? 'Mark as not read' : 'Mark as read')
+  mark.addEventListener('click', async () => {
+    mark.disabled = true
+    await toggleRead(asin, read)
+    openDetails(asin)
+  })
+  actions.append(mark)
   const reload = el('button', null, '↻')
   reload.title = 'Refresh details from Amazon'
   reload.addEventListener('click', () => {
@@ -431,8 +531,10 @@ async function openDetails(asin) {
   if (meta.reviews?.length) {
     body.append(el('h3', null, 'Reviews'))
     for (const r of meta.reviews) {
+      if (!r.body && !r.title) continue
       const rev = el('div', 'review')
-      rev.append(el('div', 'review-head', `${r.stars ? `★ ${r.stars} · ` : ''}${r.title || ''} — ${r.name || 'anonymous'}`))
+      rev.append(el('div', 'review-head',
+        `${r.stars ? `★ ${r.stars} · ` : ''}${r.title || ''} — ${r.name || 'anonymous'}${r.date ? ` · ${r.date}` : ''}`))
       rev.append(el('p', null, r.body))
       body.append(rev)
     }
@@ -465,6 +567,8 @@ window.kindle.onSyncState((s) => {
 
 $('search').addEventListener('input', renderLibrary)
 $('group-series').addEventListener('change', renderLibrary)
+$('lib-unread-only').addEventListener('change', renderLibrary)
+$('lib-released-only').addEventListener('change', renderLibrary)
 $('refresh').addEventListener('click', () => window.kindle.sync())
 $('login').addEventListener('click', () => window.kindle.openLogin())
 

@@ -203,6 +203,30 @@ function loadBooks() {
   }
 }
 
+// Manual read/unread overrides: asin -> 'read' | 'unread'. Fixes books read
+// outside the synced history (or borrowed but never actually read).
+const overridesFile = () => path.join(app.getPath('userData'), 'overrides.json')
+function loadOverrides() {
+  try {
+    return JSON.parse(fs.readFileSync(overridesFile(), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+function setOverride(asin, value) {
+  const ov = loadOverrides()
+  if (value) ov[asin] = value
+  else delete ov[asin]
+  fs.writeFileSync(overridesFile(), JSON.stringify(ov, null, 1))
+  return ov
+}
+function annotateBooks(data) {
+  if (!data) return data
+  const ov = loadOverrides()
+  for (const b of data.books || []) b.readOverride = ov[b.asin] || null
+  return data
+}
+
 async function doSync() {
   if (syncing) return
   syncing = true
@@ -216,7 +240,7 @@ async function doSync() {
       books: mergeBooks(owned, ku),
     }
     fs.writeFileSync(dataFile(), JSON.stringify(payload, null, 1))
-    send({ state: 'done', ...payload })
+    send({ state: 'done', ...annotateBooks(payload) })
   } catch (e) {
     if (e.code === 'NOT_LOGGED_IN') send({ state: 'needs-login' })
     else send({ state: 'error', message: String(e.message || e) })
@@ -265,16 +289,28 @@ function computeSeriesGroups() {
   const out = [...groups.values()]
   for (const g of out) {
     g.books.sort((a, b) => (a.num ?? 99) - (b.num ?? 99))
-    g.check = readCache('series-check', g.key, 7 * DAY)
+    g.check = annotateVolumes(readCache('series-check', g.key, 7 * DAY))
   }
   out.sort((a, b) => a.recency - b.recency)
   return out
 }
 
+// Re-annotate cached series volumes against the *current* library + overrides.
+function annotateVolumes(check) {
+  if (!check || !check.volumes) return check
+  const have = new Set((loadBooks()?.books || []).map((b) => b.asin))
+  const ov = loadOverrides()
+  for (const v of check.volumes) {
+    v.inLibrary = v.asin ? have.has(v.asin) || v.purchased : v.purchased
+    v.read = ov[v.asin] ? ov[v.asin] === 'read' : v.inLibrary
+  }
+  return check
+}
+
 async function checkSeries(key, { force = false } = {}) {
   if (!force) {
     const hit = readCache('series-check', key, 7 * DAY)
-    if (hit) return hit
+    if (hit) return annotateVolumes(hit)
   }
   const groups = computeSeriesGroups()
   const g = groups.find((x) => x.key === key)
@@ -296,34 +332,36 @@ async function checkSeries(key, { force = false } = {}) {
     result = { key, unresolved: true, checkedAt: new Date().toISOString() }
   } else {
     const page = await amazon.fetchSeriesPage(seriesAsin)
-    const data = loadBooks()
-    const have = new Set((data?.books || []).map((b) => b.asin))
-    for (const v of page.volumes) v.inLibrary = v.asin ? have.has(v.asin) : v.purchased
     result = { key, seriesAsin, ...page, checkedAt: new Date().toISOString() }
   }
   writeCache('series-check', key, result)
-  return result
+  return annotateVolumes(result)
 }
 
 // ---------- author catalog ----------
+
+function annotateCatalog(result) {
+  const byAsin = new Map((loadBooks()?.books || []).map((b) => [b.asin, b]))
+  const ov = loadOverrides()
+  for (const c of result.items || []) {
+    const mine = byAsin.get(c.asin)
+    c.inLibrary = Boolean(mine)
+    c.mySources = mine ? mine.sources : []
+    c.read = ov[c.asin] ? ov[c.asin] === 'read' : c.inLibrary
+  }
+  return result
+}
 
 async function authorCatalog(name, { force = false } = {}) {
   const cacheKey = name.toLowerCase()
   if (!force) {
     const hit = readCache('authors', cacheKey, 1 * DAY)
-    if (hit) return hit
+    if (hit) return annotateCatalog(hit)
   }
   const cards = await amazon.searchKindleStore(`"${name}"`, { maxPages: 3, tag: 'author' })
-  const data = loadBooks()
-  const byAsin = new Map((data?.books || []).map((b) => [b.asin, b]))
-  for (const c of cards) {
-    const mine = byAsin.get(c.asin)
-    c.inLibrary = Boolean(mine)
-    c.mySources = mine ? mine.sources : []
-  }
   const result = { name, fetchedAt: new Date().toISOString(), items: cards }
   writeCache('authors', cacheKey, result)
-  return result
+  return annotateCatalog(result)
 }
 
 // ---------- windows ----------
@@ -381,7 +419,11 @@ function createWindow() {
 
 // ---------- ipc ----------
 
-ipcMain.handle('books:get', () => loadBooks())
+ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
+ipcMain.handle('override:set', (_e, asin, value) => {
+  if (![null, 'read', 'unread'].includes(value)) throw new Error('bad override value')
+  setOverride(asin, value)
+})
 ipcMain.handle('sync', () => { doSync() })
 ipcMain.handle('login:open', () => { openLogin() })
 ipcMain.handle('reader:open', (_e, asin) => { openReader(asin) })
@@ -392,7 +434,8 @@ ipcMain.handle('details:get', async (_e, asin, opts) => {
   const meta = await getMeta(asin, opts || {})
   const data = loadBooks()
   const book = (data?.books || []).find((b) => b.asin === asin) || null
-  return { meta, book }
+  const ov = loadOverrides()[asin] || null
+  return { meta, book, override: ov, read: ov ? ov === 'read' : Boolean(book) }
 })
 ipcMain.handle('series:groups', () => computeSeriesGroups())
 ipcMain.handle('series:check', (_e, key, opts) => checkSeries(key, opts || {}))
