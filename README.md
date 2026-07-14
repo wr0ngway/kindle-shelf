@@ -27,20 +27,30 @@ npm start
 - Every launch auto-syncs, so data stays fresh; **↻ Refresh** re-syncs on
   demand mid-session.
 
-**Library tab** — search by author/title; *Group by series* toggle
-(series inferred from titles, refined by product metadata as it's cached).
-Badges: *Owned*, *Kindle Unlimited* (active borrow), *KU · returned*,
-reading progress.
+**Library view** — search by author/title/series; sort A–Z or by most
+recently acquired. *Group by series* (series inferred from titles, refined
+by product metadata as it's cached) unlocks the series tools: *Check for new
+books* / *Scan unchecked series* fetches each series page from Amazon and
+lists your unread volumes inline (*Released only* on by default so pre-orders
+don't clutter), *Only series with unread books* narrows to series you're
+behind on, and *Compact* hides your own books to leave just the
+what-to-read-next queue. Series checks cache for a week; ↻ re-checks.
+Control states persist across launches — "group + compact + recent + unread
+only" is the reading-queue view. Badges: *Owned*, *Kindle Unlimited* (active
+borrow), *KU · returned*, reading progress, *✓ Finished* (Amazon's read
+mark).
 
 **Author drill-down** — click any author name to fetch their full Kindle
 catalog, grouped by series, with read/unread badges. Filters: *Unread only*,
 *Released only*. If the search mixes several same-named authors, chips let
 you pick the one you meant.
 
-**Continue Series tab** — every series you've read, most recently acquired
-first. *Check for new books* (or *Scan unchecked series*) fetches the series
-page and lists unread volumes — with *Released only* on by default so
-pre-orders don't clutter the list. Results cache for a week; ↻ re-checks.
+**Read status** — presence in your library counts as read; Amazon's own
+read-state record (the Kindle apps' "Mark as read") is imported on every
+sync and is authoritative. Marking read/unread in the app pushes to Amazon;
+only what Amazon can't represent (explicit unread, books never acquired
+there) is kept as a local override, pruned automatically once Amazon's
+record supersedes it.
 
 **Book details** — click any book row: cover, synopsis, rating, reviews,
 release date, and **📖 Read with Kindle** (opens the book in an embedded

@@ -10,10 +10,6 @@
 <body>
   <header>
     <h1>Kindle Shelf</h1>
-    <nav>
-      <button class="tab active" data-view="library">Library</button>
-      <button class="tab" data-view="series">Continue Series</button>
-    </nav>
     <div id="status" class="status">Loading…</div>
     <button id="refresh" title="Re-sync from Amazon">↻ Refresh</button>
   </header>
@@ -27,10 +23,19 @@
   <main>
     <section id="view-library">
       <div class="controls">
-        <input id="search" type="search" placeholder="Search by author or title…" autofocus />
+        <input id="search" type="search" placeholder="Search by author, title, or series…" autofocus />
+        <select id="lib-sort" title="Sort order">
+          <option value="alpha">Sort: A–Z</option>
+          <option value="recent">Sort: recently acquired</option>
+        </select>
         <label><input type="checkbox" id="group-series" /> Group by series</label>
+      </div>
+      <div class="controls">
+        <label class="needs-grouping"><input type="checkbox" id="lib-compact" disabled /> Compact (unread only per series)</label>
         <label class="needs-grouping"><input type="checkbox" id="lib-unread-only" disabled /> Only series with unread books</label>
         <label class="needs-grouping"><input type="checkbox" id="lib-released-only" checked disabled /> Released only</label>
+        <button id="series-scan" disabled>Scan unchecked series</button>
+        <span id="series-progress" class="summary"></span>
       </div>
       <div id="lib-summary" class="summary"></div>
       <div id="lib-results"></div>
@@ -47,18 +52,6 @@
       <div id="author-chips" class="chips"></div>
       <div id="author-summary" class="summary"></div>
       <div id="author-results"></div>
-    </section>
-
-    <section id="view-series" class="hidden">
-      <div class="controls">
-        <input id="series-search" type="search" placeholder="Search series by name or author…" />
-        <label><input type="checkbox" id="series-released-only" checked /> Released only</label>
-        <label><input type="checkbox" id="series-continuable-only" checked /> Only series with unread books</label>
-        <button id="series-scan">Scan unchecked series</button>
-        <span id="series-progress" class="summary"></span>
-      </div>
-      <div id="series-summary" class="summary"></div>
-      <div id="series-results"></div>
     </section>
   </main>
 

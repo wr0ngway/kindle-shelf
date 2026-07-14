@@ -17,6 +17,27 @@ const state = {
   scanning: false,
 }
 
+// ---------- persisted controls ----------
+
+const PERSISTED_CONTROLS = ['lib-sort', 'group-series', 'lib-compact', 'lib-unread-only', 'lib-released-only']
+
+function restoreControls() {
+  for (const id of PERSISTED_CONTROLS) {
+    const v = localStorage.getItem(`ctl:${id}`)
+    if (v == null) continue
+    const n = $(id)
+    if (n.type === 'checkbox') n.checked = v === '1'
+    else n.value = v
+  }
+}
+
+function persistControls() {
+  for (const id of PERSISTED_CONTROLS) {
+    const n = $(id)
+    localStorage.setItem(`ctl:${id}`, n.type === 'checkbox' ? (n.checked ? '1' : '0') : n.value)
+  }
+}
+
 // ---------- helpers ----------
 
 function el(tag, cls, text) {
@@ -53,8 +74,8 @@ function authorLink(name) {
   return a
 }
 
-// Toggle a manual read/unread override (also pushed to Amazon's own
-// read-state record), then refresh whatever's on screen.
+// Toggle a read/unread mark (pushed to Amazon's own read-state record when
+// the book exists there), then refresh whatever's on screen.
 async function toggleRead(asin, currentlyRead) {
   const res = await window.kindle.setOverride(asin, currentlyRead ? 'unread' : 'read')
   await afterOverride()
@@ -74,8 +95,7 @@ async function afterOverride() {
     const cat = await window.kindle.authorCatalog(state.author.name)
     state.author.items = cat.items
   }
-  if (state.view === 'series') renderSeries()
-  else if (state.view === 'author') renderAuthor()
+  if (state.view === 'author') renderAuthor()
   renderLibrary()
 }
 
@@ -125,7 +145,7 @@ function nextUnread(check, releasedOnly) {
     .sort((a, b) => a.position - b.position)
 }
 
-// Compact row for an unread volume of a series (used in Library + Series tabs).
+// Compact row for an unread volume of a series.
 function volumeRow(v) {
   const row = el('div', 'row next-row')
   row.append(el('span', 'title', `#${v.position}  ${v.title}`))
@@ -149,32 +169,25 @@ async function checkOne(g, opts) {
   }
 }
 
-function checkButton(g, rerender) {
+function checkButton(g) {
   const btn = el('button', null, 'Check for new books')
   btn.addEventListener('click', async (e) => {
     e.stopPropagation()
     btn.textContent = 'Checking…'
     btn.disabled = true
     await checkOne(g)
-    rerender()
+    renderLibrary()
   })
   return btn
 }
 
-// ---------- tabs ----------
+// ---------- views ----------
 
 function showView(name) {
   state.view = name
-  for (const t of document.querySelectorAll('nav .tab'))
-    t.classList.toggle('active', t.dataset.view === name)
   $('view-library').classList.toggle('hidden', name !== 'library')
   $('view-author').classList.toggle('hidden', name !== 'author')
-  $('view-series').classList.toggle('hidden', name !== 'series')
-  if (name === 'series') loadSeriesView()
 }
-
-document.querySelectorAll('nav .tab').forEach((t) =>
-  t.addEventListener('click', () => showView(t.dataset.view)))
 
 // ---------- library view ----------
 
@@ -188,24 +201,29 @@ function libraryMatches() {
 }
 
 function renderLibrary() {
+  persistControls()
   const grouped = $('group-series').checked
   for (const label of document.querySelectorAll('.needs-grouping')) {
     label.style.opacity = grouped ? 1 : 0.45
     label.querySelector('input').disabled = !grouped
   }
-  const matches = libraryMatches()
-  const q = $('search').value.trim()
-  $('lib-summary').textContent = q
-    ? `${matches.length} of ${state.books.length} books match “${q}”`
-    : `${state.books.length} books`
+  $('series-scan').disabled = !grouped
 
+  const matches = libraryMatches()
   const wrap = $('lib-results')
   wrap.replaceChildren()
-  if (grouped) renderLibraryGrouped(wrap, matches)
-  else {
-    for (const b of matches.slice(0, MAX_ROWS)) wrap.append(bookRow(b))
-    if (matches.length > MAX_ROWS)
-      wrap.append(el('div', 'summary', `…and ${matches.length - MAX_ROWS} more — narrow the search.`))
+  if (grouped) {
+    renderLibraryGrouped(wrap, matches)
+  } else {
+    const q = $('search').value.trim()
+    $('lib-summary').textContent = q
+      ? `${matches.length} of ${state.books.length} books match “${q}”`
+      : `${state.books.length} books`
+    const sorted = [...matches]
+    if ($('lib-sort').value === 'recent') sorted.sort((a, b) => a.recency - b.recency)
+    for (const b of sorted.slice(0, MAX_ROWS)) wrap.append(bookRow(b))
+    if (sorted.length > MAX_ROWS)
+      wrap.append(el('div', 'summary', `…and ${sorted.length - MAX_ROWS} more — narrow the search.`))
   }
 }
 
@@ -216,18 +234,27 @@ function renderLibraryGrouped(wrap, matches) {
     ensureSeriesGroups().then(renderLibrary)
     return
   }
+  const q = $('search').value.trim().toLowerCase()
+  const compact = $('lib-compact').checked
   const unreadOnly = $('lib-unread-only').checked
   const releasedOnly = $('lib-released-only').checked
+  const recentFirst = $('lib-sort').value === 'recent'
   const matchAsins = new Set(matches.map((b) => b.asin))
   const byAsin = new Map(state.books.map((b) => [b.asin, b]))
   const groupedAsins = new Set()
   for (const g of groups) for (const b of g.books) groupedAsins.add(b.asin)
 
-  const sorted = [...groups].sort((a, b) => a.name.localeCompare(b.name))
+  const sorted = [...groups].sort(recentFirst
+    ? (a, b) => a.recency - b.recency
+    : (a, b) => a.name.localeCompare(b.name))
+
   let shown = 0
+  let checked = 0
   for (const g of sorted) {
+    if (g.check) checked++
     const members = g.books.map((b) => byAsin.get(b.asin)).filter(Boolean)
-    if (!members.some((b) => matchAsins.has(b.asin))) continue
+    const nameMatch = !q || (g.check?.name || g.name).toLowerCase().includes(q)
+    if (!nameMatch && !members.some((b) => matchAsins.has(b.asin))) continue
 
     const next = nextUnread(g.check, releasedOnly)
     if (unreadOnly) {
@@ -237,14 +264,33 @@ function renderLibraryGrouped(wrap, matches) {
 
     const sec = el('div', 'series-group')
     const head = el('h3')
-    head.append(`${g.check?.name || g.name} · ${members.length} book${members.length > 1 ? 's' : ''}` +
-      (g.check?.total ? ` of ${g.check.total}` : ''))
+    const maxNum = Math.max(0, ...g.books.map((b) => b.num ?? 0))
+    const total = g.check?.total || g.total
+    head.append(
+      `${g.check?.name || g.name} · ${members.length} read` +
+      (maxNum ? ` · up to #${maxNum}` : '') +
+      (total ? ` · ${total} in series` : ''))
     if (!g.check) {
       head.append(' ')
-      head.append(checkButton(g, renderLibrary))
+      head.append(checkButton(g))
+    } else if (g.check.unresolved) {
+      head.append(' ')
+      head.append(el('span', null, 'series page not found'))
+    } else {
+      const btn = el('button', null, '↻')
+      btn.title = 'Re-check this series now'
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        btn.disabled = true
+        await checkOne(g, { force: true })
+        renderLibrary()
+      })
+      head.append(' ')
+      head.append(btn)
     }
     sec.append(head)
-    for (const b of members) sec.append(bookRow(b))
+
+    if (!compact) for (const b of members) sec.append(bookRow(b))
     if (next && next.length) {
       for (const v of next.slice(0, 4)) sec.append(volumeRow(v))
       if (next.length > 4) sec.append(el('div', 'summary', `…and ${next.length - 4} more unread`))
@@ -255,7 +301,7 @@ function renderLibraryGrouped(wrap, matches) {
     shown++
   }
 
-  if (!unreadOnly) {
+  if (!unreadOnly && !compact) {
     const solo = matches.filter((b) => !groupedAsins.has(b.asin))
     if (solo.length) {
       const sec = el('div', 'series-group')
@@ -264,8 +310,33 @@ function renderLibraryGrouped(wrap, matches) {
       wrap.append(sec)
     }
   }
+  $('lib-summary').textContent =
+    `${groups.length} series · ${checked} checked · showing ${shown}` + (q ? ` matching “${q}”` : '')
   if (!shown) wrap.append(el('div', 'summary', 'No series match the current filters.'))
 }
+
+$('series-scan').addEventListener('click', async () => {
+  if (state.scanning) {
+    state.scanning = false
+    $('series-scan').textContent = 'Scan unchecked series'
+    return
+  }
+  state.scanning = true
+  $('series-scan').textContent = 'Stop scan'
+  await ensureSeriesGroups()
+  const queue = (state.seriesGroups || []).filter((g) => !g.check)
+  let done = 0
+  for (const g of queue) {
+    if (!state.scanning) break
+    $('series-progress').textContent = `scanning ${g.name}… (${done}/${queue.length})`
+    await checkOne(g)
+    done++
+    renderLibrary()
+  }
+  state.scanning = false
+  $('series-progress').textContent = `scan finished (${done} series)`
+  $('series-scan').textContent = 'Scan unchecked series'
+})
 
 // ---------- author view ----------
 
@@ -370,109 +441,6 @@ $('author-refresh').addEventListener('click', () => state.author && openAuthorVi
 $('author-unread-only').addEventListener('change', renderAuthor)
 $('author-released-only').addEventListener('change', renderAuthor)
 
-// ---------- continue-series view ----------
-
-async function loadSeriesView() {
-  $('series-summary').textContent = 'Computing series…'
-  await ensureSeriesGroups()
-  renderSeries()
-}
-
-function seriesMatchesQuery(g, q) {
-  if (!q) return true
-  if ((g.check?.name || g.name).toLowerCase().includes(q)) return true
-  const byAsin = new Map(state.books.map((b) => [b.asin, b]))
-  return g.books.some((b) => {
-    if (b.title.toLowerCase().includes(q)) return true
-    const full = byAsin.get(b.asin)
-    return (full?.authors || []).some((a) => a.toLowerCase().includes(q))
-  })
-}
-
-function renderSeries() {
-  const releasedOnly = $('series-released-only').checked
-  const continuableOnly = $('series-continuable-only').checked
-  const q = $('series-search').value.trim().toLowerCase()
-  const groups = state.seriesGroups || []
-  const wrap = $('series-results')
-  wrap.replaceChildren()
-
-  let shown = 0
-  let checked = 0
-  for (const g of groups) {
-    if (g.check) checked++
-    if (!seriesMatchesQuery(g, q)) continue
-    const next = nextUnread(g.check, releasedOnly)
-    if (continuableOnly && g.check && !g.check.unresolved && (!next || !next.length)) continue
-    if (continuableOnly && g.check?.unresolved) continue
-
-    const sec = el('div', 'series-row')
-    const head = el('div', 'series-head')
-    const maxRead = Math.max(...g.books.map((b) => b.num ?? 0))
-    head.append(el('span', 'title', g.check?.name || g.name))
-    head.append(el('span', 'authors',
-      `${g.books.length} read${maxRead ? ` · up to #${maxRead}` : ''}` +
-      (g.check?.total ? ` · ${g.check.total} in series` : g.total ? ` · ${g.total} in series` : '')))
-
-    const action = el('span', 'series-action')
-    if (!g.check) {
-      action.append(checkButton(g, renderSeries))
-    } else if (g.check.unresolved) {
-      action.append(el('span', 'summary', 'series page not found'))
-    } else {
-      const btn = el('button', null, '↻')
-      btn.title = 'Re-check now'
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation()
-        btn.disabled = true
-        await checkOne(g, { force: true })
-        renderSeries()
-      })
-      action.append(btn)
-    }
-    head.append(action)
-    sec.append(head)
-
-    if (next && next.length) {
-      for (const v of next.slice(0, 4)) sec.append(volumeRow(v))
-      if (next.length > 4) sec.append(el('div', 'summary', `…and ${next.length - 4} more unread`))
-    } else if (g.check && !g.check.unresolved) {
-      sec.append(el('div', 'summary caught-up', '✓ caught up'))
-    }
-    wrap.append(sec)
-    shown++
-  }
-  $('series-summary').textContent =
-    `${groups.length} series · ${checked} checked · showing ${shown}` +
-    (continuableOnly ? ' with unread books (or unchecked)' : '')
-}
-
-$('series-scan').addEventListener('click', async () => {
-  if (state.scanning) {
-    state.scanning = false
-    $('series-scan').textContent = 'Scan unchecked series'
-    return
-  }
-  state.scanning = true
-  $('series-scan').textContent = 'Stop scan'
-  const queue = (state.seriesGroups || []).filter((g) => !g.check)
-  let done = 0
-  for (const g of queue) {
-    if (!state.scanning) break
-    $('series-progress').textContent = `scanning ${g.name}… (${done}/${queue.length})`
-    await checkOne(g)
-    done++
-    renderSeries()
-  }
-  state.scanning = false
-  $('series-progress').textContent = `scan finished (${done} series)`
-  $('series-scan').textContent = 'Scan unchecked series'
-})
-
-$('series-released-only').addEventListener('change', renderSeries)
-$('series-continuable-only').addEventListener('change', renderSeries)
-$('series-search').addEventListener('input', renderSeries)
-
 // ---------- details drawer ----------
 
 async function openDetails(asin) {
@@ -512,6 +480,7 @@ async function openDetails(asin) {
 
   const badges = el('div', 'badges')
   for (const s of book?.sources || []) badges.append(badge(s))
+  if (book?.amazonRead || book?.amazonReadStatus === 'READ') badges.append(badge('progress', '✓ Finished'))
   if (!read) badges.append(badge('unread'))
   else if (!book) badges.append(badge('progress', 'Marked read'))
   if (meta.kuAvailable) badges.append(badge('ku-avail', 'On KU'))
@@ -585,12 +554,15 @@ window.kindle.onSyncState((s) => {
 })
 
 $('search').addEventListener('input', renderLibrary)
+$('lib-sort').addEventListener('change', renderLibrary)
 $('group-series').addEventListener('change', renderLibrary)
+$('lib-compact').addEventListener('change', renderLibrary)
 $('lib-unread-only').addEventListener('change', renderLibrary)
 $('lib-released-only').addEventListener('change', renderLibrary)
 $('refresh').addEventListener('click', () => window.kindle.sync())
 $('login').addEventListener('click', () => window.kindle.openLogin())
 
+restoreControls()
 ;(async () => {
   const data = await window.kindle.getBooks()
   if (data) {
