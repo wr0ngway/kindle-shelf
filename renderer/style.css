@@ -75,7 +75,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 .controls h2 { margin: 0; font-size: 1.1rem; flex: 0 1 auto; }
 .controls label { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
 
-#search {
+#search,
+#series-search {
   flex: 1;
   min-width: 200px;
   font: inherit;
@@ -87,7 +88,8 @@ button:disabled { opacity: 0.5; cursor: default; }
   color: var(--fg);
   outline: none;
 }
-#search:focus { border-color: var(--accent); }
+#search:focus,
+#series-search:focus { border-color: var(--accent); }
 
 .summary { margin: 0.5rem 0.15rem; color: var(--muted); font-size: 0.85rem; }
 

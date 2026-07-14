@@ -378,9 +378,21 @@ async function loadSeriesView() {
   renderSeries()
 }
 
+function seriesMatchesQuery(g, q) {
+  if (!q) return true
+  if ((g.check?.name || g.name).toLowerCase().includes(q)) return true
+  const byAsin = new Map(state.books.map((b) => [b.asin, b]))
+  return g.books.some((b) => {
+    if (b.title.toLowerCase().includes(q)) return true
+    const full = byAsin.get(b.asin)
+    return (full?.authors || []).some((a) => a.toLowerCase().includes(q))
+  })
+}
+
 function renderSeries() {
   const releasedOnly = $('series-released-only').checked
   const continuableOnly = $('series-continuable-only').checked
+  const q = $('series-search').value.trim().toLowerCase()
   const groups = state.seriesGroups || []
   const wrap = $('series-results')
   wrap.replaceChildren()
@@ -389,6 +401,7 @@ function renderSeries() {
   let checked = 0
   for (const g of groups) {
     if (g.check) checked++
+    if (!seriesMatchesQuery(g, q)) continue
     const next = nextUnread(g.check, releasedOnly)
     if (continuableOnly && g.check && !g.check.unresolved && (!next || !next.length)) continue
     if (continuableOnly && g.check?.unresolved) continue
@@ -458,6 +471,7 @@ $('series-scan').addEventListener('click', async () => {
 
 $('series-released-only').addEventListener('change', renderSeries)
 $('series-continuable-only').addEventListener('change', renderSeries)
+$('series-search').addEventListener('input', renderSeries)
 
 // ---------- details drawer ----------
 
