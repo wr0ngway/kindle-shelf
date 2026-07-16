@@ -679,24 +679,37 @@ async function remoteStatus() {
   const s = loadSettings()
   const enabled = Boolean(remoteHandle)
   const ts = await tailscale.status()
+  const running = ts.state === 'running'
   const port = s.remote?.port || 8787
-  const serveActive = enabled && ts.available ? await tailscale.serveActive(port) : false
+  const serveActive = enabled && running ? await tailscale.serveActive(port) : false
 
   const urls = []
   if (enabled) {
     if (serveActive && ts.dnsName) urls.push({ label: 'Tailscale HTTPS', url: `https://${ts.dnsName}` })
-    if (ts.available && ts.ip) urls.push({ label: 'Tailscale', url: `http://${ts.ip}:${port}` })
+    if (running && ts.ip) urls.push({ label: 'Tailscale', url: `http://${ts.ip}:${port}` })
     const lan = lanIp()
     if (lan) urls.push({ label: 'Wi-Fi (LAN)', url: `http://${lan}:${port}` })
     for (const u of urls)
       u.qr = await QRCode.toDataURL(`${u.url}/?token=${s.remote.token}`, { width: 300, margin: 1 })
   }
+
+  const phoneStore = {}
+  if (enabled)
+    for (const [os_, url] of Object.entries(tailscale.PHONE_STORE_URLS))
+      phoneStore[os_] = { url, qr: await QRCode.toDataURL(url, { width: 220, margin: 1 }) }
+
   return {
     enabled,
     port,
     token: s.remote?.token || null,
     urls,
-    tailscale: { ...ts, serveActive },
+    tailscale: {
+      ...ts,
+      serveActive,
+      platform: process.platform,
+      downloadUrl: tailscale.downloadUrl(),
+    },
+    phoneStore,
   }
 }
 
@@ -722,14 +735,17 @@ ipcMain.handle('remote:tailscale', async (_e, enable) => {
     else await tailscale.disableServe()
     return await remoteStatus()
   } catch (e) {
-    return { error: String(e.message || e) }
+    let error = String(e.message || e)
+    if (/cert|https|magicdns/i.test(error))
+      error += ' — enable MagicDNS and HTTPS certificates in the Tailscale admin console (DNS tab), then retry.'
+    return { error }
   }
 })
 ipcMain.handle('sync', () => { doSync() })
 ipcMain.handle('login:open', () => { openLogin() })
 ipcMain.handle('reader:open', (_e, asin) => { openReader(asin) })
 ipcMain.handle('external:open', (_e, url) => {
-  if (/^https:\/\/(www|read|smile)\.amazon\.com\//.test(url)) shell.openExternal(url)
+  if (/^https:\/\/((www|read|smile)\.amazon\.com|tailscale\.com)\//.test(url)) shell.openExternal(url)
 })
 ipcMain.handle('details:get', (_e, asin, opts) => getDetailsPayload(asin, opts || {}))
 ipcMain.handle('series:groups', () => computeSeriesGroups())

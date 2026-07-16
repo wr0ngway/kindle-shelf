@@ -551,7 +551,7 @@ $('details-close').addEventListener('click', () => $('details').classList.add('h
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     $('details').classList.add('hidden')
-    $('remote-panel').classList.add('hidden')
+    closeRemotePanel()
   }
 })
 
@@ -565,7 +565,7 @@ let remoteSelectedUrl = null
 async function openRemotePanel() {
   const body = $('remote-body')
   $('remote-panel').classList.remove('hidden')
-  body.replaceChildren(el('div', 'summary', 'Loading…'))
+  if (!body.childElementCount) body.replaceChildren(el('div', 'summary', 'Loading…'))
   const st = await window.kindle.remoteStatus()
   body.replaceChildren()
   body.append(el('h2', null, 'Remote access'))
@@ -607,29 +607,8 @@ async function openRemotePanel() {
     '2. The token is stored in the phone browser — no sign-in after that. ' +
     '3. Use “Add to Home Screen” for an app-like launch.'))
 
-  body.append(el('h3', null, 'Tailscale'))
-  if (!st.tailscale?.available) {
-    body.append(el('p', 'summary',
-      'Tailscale not detected. Install it on this Mac and your phone (tailscale.com) to reach ' +
-      'Kindle Shelf securely from anywhere — not just this Wi-Fi — with an HTTPS address that ' +
-      'enables full PWA install. Never exposed to the public internet.'))
-  } else {
-    body.append(el('div', 'summary', `Tailnet address: ${st.tailscale.dnsName || st.tailscale.ip}`))
-    const ts = el('button', null, st.tailscale.serveActive
-      ? 'Disable HTTPS address (tailscale serve)'
-      : 'Enable HTTPS address (tailscale serve)')
-    ts.addEventListener('click', async () => {
-      ts.disabled = true
-      ts.textContent = 'Working…'
-      const r = await window.kindle.remoteTailscale(!st.tailscale.serveActive)
-      if (r?.error) alert(`Tailscale: ${r.error}`)
-      openRemotePanel()
-    })
-    body.append(ts)
-    body.append(el('p', 'summary',
-      'Gives a stable https://…ts.net address reachable from anywhere on your tailnet ' +
-      '(and only your tailnet), with a trusted certificate — required for full PWA install.'))
-  }
+  body.append(el('h3', null, 'Tailscale — access from anywhere'))
+  renderTailscaleSection(body, st)
 
   body.append(el('h3', null, 'Access token'))
   body.append(el('div', 'summary mono', st.token || '—'))
@@ -641,11 +620,106 @@ async function openRemotePanel() {
     openRemotePanel()
   })
   body.append(regen)
+
+  // Auto-refresh while Tailscale setup is incomplete so steps tick off live.
+  if (remotePoll) clearInterval(remotePoll)
+  remotePoll = null
+  if (st.enabled && st.tailscale?.state !== 'running')
+    remotePoll = setInterval(() => {
+      if ($('remote-panel').classList.contains('hidden')) closeRemotePanel()
+      else openRemotePanel()
+    }, 5000)
+}
+
+let remotePhoneOs = 'android'
+
+function tsStep(n, done, label) {
+  const row = el('div', `ts-step ${done ? 'done' : ''}`)
+  row.append(el('span', 'ts-step-mark', done ? '✓' : `${n}.`))
+  const content = el('span', 'ts-step-body')
+  if (typeof label === 'string') content.append(label)
+  else content.append(...label)
+  row.append(content)
+  return row
+}
+
+// Setup stepper when the tailnet isn't up yet; serve controls once it is.
+function renderTailscaleSection(body, st) {
+  const ts = st.tailscale || {}
+
+  if (ts.state === 'running') {
+    body.append(el('div', 'summary', `Connected: ${ts.dnsName || ts.ip}`))
+    const btn = el('button', null, ts.serveActive
+      ? 'Disable HTTPS address (tailscale serve)'
+      : 'Enable HTTPS address (tailscale serve)')
+    btn.addEventListener('click', async () => {
+      btn.disabled = true
+      btn.textContent = 'Working…'
+      const r = await window.kindle.remoteTailscale(!ts.serveActive)
+      if (r?.error) alert(`Tailscale: ${r.error}`)
+      openRemotePanel()
+    })
+    body.append(btn)
+    body.append(el('p', 'summary',
+      'Gives a stable https://…ts.net address reachable from anywhere on your tailnet ' +
+      '(and only your tailnet), with a trusted certificate — required for full PWA install.'))
+    return
+  }
+
+  body.append(el('p', 'summary',
+    'The Wi-Fi address above only works at home. Tailscale (free for personal use) adds a ' +
+    'private HTTPS address that works from anywhere — three steps:'))
+
+  // Step 1: install on this computer
+  const installed = Boolean(ts.installed)
+  if (installed) {
+    body.append(tsStep(1, true, 'Tailscale is installed on this computer'))
+  } else {
+    const dl = el('button', null, 'Download Tailscale')
+    dl.addEventListener('click', () => window.kindle.openExternal(ts.downloadUrl))
+    body.append(tsStep(1, false, ['Install Tailscale on this computer  ', dl]))
+  }
+
+  // Step 2: sign in on this computer
+  const trayName = ts.platform === 'darwin' ? 'menu bar' : 'system tray'
+  const signinText = ts.state === 'needs-login' || ts.state === 'stopped' || ts.state === 'error'
+    ? `Open Tailscale from the ${trayName} and sign in — any Google, Apple, GitHub, or Microsoft account works`
+    : ts.state === 'starting'
+      ? 'Tailscale is starting…'
+      : 'Sign in with any Google, Apple, GitHub, or Microsoft account'
+  body.append(tsStep(2, false, signinText))
+
+  // Step 3: phone app
+  const phone = el('span', 'ts-step-body')
+  phone.append('Install Tailscale on your phone and sign into the same account:  ')
+  for (const os of ['android', 'ios']) {
+    const c = el('button', `chip ${remotePhoneOs === os ? 'active' : ''}`, os === 'android' ? 'Android' : 'iPhone')
+    c.addEventListener('click', () => { remotePhoneOs = os; openRemotePanel() })
+    phone.append(c)
+  }
+  body.append(tsStep(3, false, [phone]))
+  if (st.phoneStore?.[remotePhoneOs]) {
+    const qr = el('img', 'qr qr-small')
+    qr.src = st.phoneStore[remotePhoneOs].qr
+    body.append(qr)
+  }
+
+  body.append(el('p', 'summary',
+    'This panel updates automatically as each step completes. Once connected, an ' +
+    '“Enable HTTPS” button appears here.'))
+}
+
+let remotePoll = null
+
+function closeRemotePanel() {
+  $('remote-panel').classList.add('hidden')
+  if (remotePoll) clearInterval(remotePoll)
+  remotePoll = null
 }
 
 if (remoteSupported) {
   $('remote-btn').addEventListener('click', openRemotePanel)
-  $('remote-close').addEventListener('click', () => $('remote-panel').classList.add('hidden'))
+  $('remote-close').addEventListener('click', closeRemotePanel)
 }
 
 // ---------- sync plumbing ----------

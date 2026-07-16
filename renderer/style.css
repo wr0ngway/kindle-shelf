@@ -233,3 +233,16 @@ button:disabled { opacity: 0.5; cursor: default; }
   .row .title { flex-basis: 100%; }
   #details { width: 100vw; }
 }
+
+.ts-step {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+.ts-step.done { color: var(--muted); }
+.ts-step-mark { min-width: 1.2rem; font-weight: 600; }
+.ts-step.done .ts-step-mark { color: #16a34a; }
+.ts-step-body { flex: 1; }
+.qr-small { width: 150px; margin-left: 1.7rem; }
