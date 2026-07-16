@@ -739,8 +739,10 @@ ipcMain.handle('remote:tailscale', async (_e, enable) => {
       shell.openExternal(e.enableUrl)
       return {
         error:
-          'One-time Tailscale approval needed — a browser page just opened: ' +
-          'click “Enable Serve” there, then press this button again.',
+          'One-time Tailscale approval needed — a browser page just opened ("Start using Serve"). ' +
+          'Keep "HTTPS certificates" checked, but UNCHECK "Tailscale Funnel (optional)" — ' +
+          'Funnel exposes services to the public internet and Kindle Shelf must stay tailnet-only. ' +
+          'Then click Enable and press this button again.',
       }
     }
     let error = String(e.message || e)

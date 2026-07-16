@@ -662,7 +662,10 @@ function renderTailscaleSection(body, st) {
     body.append(btn)
     body.append(el('p', 'summary',
       'Gives a stable https://…ts.net address reachable from anywhere on your tailnet ' +
-      '(and only your tailnet), with a trusted certificate — required for full PWA install.'))
+      '(and only your tailnet), with a trusted certificate — required for full PWA install. ' +
+      'First use needs a one-time approval page: keep “HTTPS certificates” checked but ' +
+      'uncheck “Tailscale Funnel” — Funnel is public-internet exposure, which this app ' +
+      'should never have.'))
     return
   }
 

@@ -103,7 +103,14 @@ With [Tailscale](https://tailscale.com) installed, one button runs
 `tailscale serve` to add a stable `https://…ts.net` address that works from
 anywhere on your tailnet (and only your tailnet) with a trusted certificate —
 which also unlocks full PWA install on Android. Without it, the QR uses your
-LAN address (same Wi-Fi only).
+LAN address (same Wi-Fi only). The panel walks through the whole setup
+(download links, sign-in, phone app QR) if Tailscale isn't installed yet.
+
+> **First-time Serve approval:** the first HTTPS enable opens Tailscale's
+> "Start using Serve" page. Keep **HTTPS certificates** checked, but
+> **uncheck "Tailscale Funnel (optional)"** — it's pre-checked, and Funnel
+> routes traffic from the *public internet* to your devices. Kindle Shelf
+> only needs Serve (tailnet-only) and never uses Funnel; don't grant it.
 
 Amazon sign-in stays desktop-only; the phone is a client of the desktop app's
 session. Don't port-forward the remote port to the public internet — the
