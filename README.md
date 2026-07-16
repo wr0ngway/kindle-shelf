@@ -29,12 +29,14 @@ npm start
 
 **Library view** — search by author/title/series; sort A–Z or by most
 recently acquired. *Group by series* (series inferred from titles, refined
-by product metadata as it's cached) unlocks the series tools: *Check for new
-books* / *Scan unchecked series* fetches each series page from Amazon and
-lists your unread volumes inline (*Released only* on by default so pre-orders
-don't clutter), *Only series with unread books* narrows to series you're
-behind on, and *Compact* hides your own books to leave just the
-what-to-read-next queue. Series checks cache for a week; ↻ re-checks.
+by product metadata as it's cached) unlocks the series tools: each series
+page is fetched from Amazon automatically in the background after every sync
+(first launch scans everything), listing unread volumes inline (*Released
+only* on by default so pre-orders don't clutter); *Only series with unread
+books* narrows to series you're behind on, and *Compact* hides your own
+books to leave just the what-to-read-next queue. Series checks cache for a
+week; the header ↻ Refresh re-syncs and re-scans (and stops a running scan);
+per-series ↻ re-checks one series.
 Control states persist across launches — "group + compact + recent + unread
 only" is the reading-queue view. Badges: *Owned*, *Kindle Unlimited* (active
 borrow), *KU · returned*, reading progress, *✓ Finished* (Amazon's read

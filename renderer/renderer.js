@@ -15,6 +15,25 @@ const state = {
   author: null, // {name, items, chip}
   seriesGroups: null,
   scanning: false,
+  syncing: false,
+  statusBase: '', // last sync summary, restored after transient messages
+}
+
+// One header button: refresh (sync → auto-scan) when idle, stop while scanning.
+function refreshUi() {
+  const btn = $('refresh')
+  if (state.syncing) {
+    btn.disabled = true
+    btn.textContent = 'Syncing…'
+  } else if (state.scanning) {
+    btn.disabled = false
+    btn.textContent = '■ Stop scan'
+    btn.title = 'Stop the background series scan'
+  } else {
+    btn.disabled = false
+    btn.textContent = '↻ Refresh'
+    btn.title = 'Re-sync from Amazon (series scan follows automatically)'
+  }
 }
 
 // ---------- persisted controls ----------
@@ -314,19 +333,12 @@ function renderLibraryGrouped(wrap, matches) {
   if (!shown) wrap.append(el('div', 'summary', 'No series match the current filters.'))
 }
 
-// The scan itself runs in the main process (auto-started after each sync);
-// the button just starts/stops it, and events keep the view live.
-$('series-scan').addEventListener('click', () => {
-  if (state.scanning) window.kindle.scanStop()
-  else window.kindle.scanStart()
-})
-
+// The scan runs in the main process, auto-started after each sync; events
+// keep the view live and drive the header button/status line.
 window.kindle.onScanState((s) => {
   if (s.state === 'scanning') {
     state.scanning = true
-    $('series-scan').textContent = 'Stop scan'
-    $('series-progress').textContent =
-      `checking series… ${s.done}/${s.total}${s.name ? ` · ${s.name}` : ''}`
+    setStatus(`Checking series ${s.done}/${s.total}${s.name ? ` · ${s.name}` : ''}`)
     if (s.key && s.check && state.seriesGroups) {
       const g = state.seriesGroups.find((x) => x.key === s.key)
       if (g) g.check = s.check
@@ -334,16 +346,14 @@ window.kindle.onScanState((s) => {
     if (s.key && $('group-series').checked && state.view === 'library') renderLibrary()
   } else {
     state.scanning = false
-    $('series-scan').textContent = 'Scan unchecked series'
-    $('series-progress').textContent = s.total
-      ? `scan ${s.stopped ? 'stopped' : 'finished'} (${s.done}/${s.total})`
-      : (s.message || '')
+    setStatus(state.statusBase || fmtSynced())
     if (state.seriesGroups)
       window.kindle.seriesGroups().then((g) => {
         state.seriesGroups = g
         if (state.view === 'library') renderLibrary()
       })
   }
+  refreshUi()
 })
 
 // ---------- author view ----------
@@ -547,6 +557,7 @@ document.addEventListener('keydown', (e) => {
 window.kindle.onSyncState((s) => {
   $('login-banner').classList.toggle('hidden', s.state !== 'needs-login')
   $('error-banner').classList.toggle('hidden', s.state !== 'error')
+  state.syncing = s.state === 'syncing'
   if (s.state === 'syncing') setStatus(`Syncing — ${s.detail || ''}`)
   else if (s.state === 'needs-login') setStatus('Sign-in required')
   else if (s.state === 'error') {
@@ -557,8 +568,10 @@ window.kindle.onSyncState((s) => {
     state.syncedAt = s.syncedAt
     state.seriesGroups = null // recompute lazily
     renderLibrary()
-    setStatus(`${s.counts.owned} library + ${s.counts.ku} KU · ${fmtSynced()}`)
+    state.statusBase = `${s.counts.owned} library + ${s.counts.ku} KU · ${fmtSynced()}`
+    setStatus(state.statusBase)
   }
+  refreshUi()
 })
 
 $('search').addEventListener('input', renderLibrary)
@@ -567,7 +580,10 @@ $('group-series').addEventListener('change', renderLibrary)
 $('lib-compact').addEventListener('change', renderLibrary)
 $('lib-unread-only').addEventListener('change', renderLibrary)
 $('lib-released-only').addEventListener('change', renderLibrary)
-$('refresh').addEventListener('click', () => window.kindle.sync())
+$('refresh').addEventListener('click', () => {
+  if (state.scanning) window.kindle.scanStop()
+  else window.kindle.sync()
+})
 $('login').addEventListener('click', () => window.kindle.openLogin())
 
 restoreControls()
