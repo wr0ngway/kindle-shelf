@@ -324,6 +324,7 @@ async function doSync() {
     fs.writeFileSync(dataFile(), JSON.stringify(payload, null, 1))
     pruneOverrides(books)
     send({ state: 'done', ...annotateBooks(payload) })
+    startScan() // fills in / refreshes series data in the background
   } catch (e) {
     if (e.code === 'NOT_LOGGED_IN') send({ state: 'needs-login' })
     else send({ state: 'error', message: String(e.message || e) })
@@ -420,6 +421,50 @@ async function checkSeries(key, { force = false } = {}) {
   }
   writeCache('series-check', key, result)
   return annotateVolumes(result)
+}
+
+// ---------- background series scan ----------
+// Runs after every successful sync: checks any series without fresh cached
+// data (first launch = everything), newest acquisitions first, throttled by
+// the shared page-fetch queue.
+
+let scanning = false
+let scanStopRequested = false
+
+function sendScan(evt) {
+  if (win && !win.isDestroyed()) win.webContents.send('scan-state', evt)
+}
+
+async function startScan() {
+  if (scanning) return
+  scanning = true
+  scanStopRequested = false
+  try {
+    const queue = computeSeriesGroups().filter((g) => !g.check)
+    const total = queue.length
+    if (!total) {
+      sendScan({ state: 'idle', message: 'all series checked' })
+      return
+    }
+    console.log(`[scan] ${total} unchecked series`)
+    sendScan({ state: 'scanning', done: 0, total })
+    let done = 0
+    for (const g of queue) {
+      if (scanStopRequested) break
+      let check = null
+      try {
+        check = await checkSeries(g.key)
+      } catch (e) {
+        console.log('[scan] failed:', g.name, String(e.message || e))
+      }
+      done++
+      sendScan({ state: 'scanning', done, total, name: g.name, key: g.key, check })
+    }
+    console.log(`[scan] ${scanStopRequested ? 'stopped' : 'finished'} (${done}/${total})`)
+    sendScan({ state: 'idle', done, total, stopped: scanStopRequested })
+  } finally {
+    scanning = false
+  }
 }
 
 // ---------- author catalog ----------
@@ -557,6 +602,8 @@ ipcMain.handle('details:get', async (_e, asin, opts) => {
   }
 })
 ipcMain.handle('series:groups', () => computeSeriesGroups())
+ipcMain.handle('scan:start', () => { startScan() })
+ipcMain.handle('scan:stop', () => { scanStopRequested = true })
 ipcMain.handle('series:check', (_e, key, opts) => checkSeries(key, opts || {}))
 ipcMain.handle('author:catalog', (_e, name, opts) => authorCatalog(name, opts || {}))
 

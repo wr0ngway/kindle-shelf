@@ -207,7 +207,6 @@ function renderLibrary() {
     label.style.opacity = grouped ? 1 : 0.45
     label.querySelector('input').disabled = !grouped
   }
-  $('series-scan').disabled = !grouped
 
   const matches = libraryMatches()
   const wrap = $('lib-results')
@@ -315,27 +314,36 @@ function renderLibraryGrouped(wrap, matches) {
   if (!shown) wrap.append(el('div', 'summary', 'No series match the current filters.'))
 }
 
-$('series-scan').addEventListener('click', async () => {
-  if (state.scanning) {
+// The scan itself runs in the main process (auto-started after each sync);
+// the button just starts/stops it, and events keep the view live.
+$('series-scan').addEventListener('click', () => {
+  if (state.scanning) window.kindle.scanStop()
+  else window.kindle.scanStart()
+})
+
+window.kindle.onScanState((s) => {
+  if (s.state === 'scanning') {
+    state.scanning = true
+    $('series-scan').textContent = 'Stop scan'
+    $('series-progress').textContent =
+      `checking series… ${s.done}/${s.total}${s.name ? ` · ${s.name}` : ''}`
+    if (s.key && s.check && state.seriesGroups) {
+      const g = state.seriesGroups.find((x) => x.key === s.key)
+      if (g) g.check = s.check
+    }
+    if (s.key && $('group-series').checked && state.view === 'library') renderLibrary()
+  } else {
     state.scanning = false
     $('series-scan').textContent = 'Scan unchecked series'
-    return
+    $('series-progress').textContent = s.total
+      ? `scan ${s.stopped ? 'stopped' : 'finished'} (${s.done}/${s.total})`
+      : (s.message || '')
+    if (state.seriesGroups)
+      window.kindle.seriesGroups().then((g) => {
+        state.seriesGroups = g
+        if (state.view === 'library') renderLibrary()
+      })
   }
-  state.scanning = true
-  $('series-scan').textContent = 'Stop scan'
-  await ensureSeriesGroups()
-  const queue = (state.seriesGroups || []).filter((g) => !g.check)
-  let done = 0
-  for (const g of queue) {
-    if (!state.scanning) break
-    $('series-progress').textContent = `scanning ${g.name}… (${done}/${queue.length})`
-    await checkOne(g)
-    done++
-    renderLibrary()
-  }
-  state.scanning = false
-  $('series-progress').textContent = `scan finished (${done} series)`
-  $('series-scan').textContent = 'Scan unchecked series'
 })
 
 // ---------- author view ----------
