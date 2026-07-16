@@ -1,16 +1,59 @@
 {
   "name": "kindle-shelf",
   "version": "0.1.0",
-  "description": "Which Kindle books (owned + Kindle Unlimited) have I already read, by author?",
+  "description": "Which Kindle books (owned + Kindle Unlimited) have I already read, by author or series?",
+  "author": "Matt Conway <matt@neurometric.ai>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wr0ngway/kindle-shelf.git"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "smoke": "electron . --smoke"
+    "smoke": "electron . --smoke",
+    "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^38"
+    "electron": "^38",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
     "cheerio": "^1.2.0"
+  },
+  "build": {
+    "appId": "dev.wr0ngway.kindle-shelf",
+    "productName": "Kindle Shelf",
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "renderer/**"
+    ],
+    "mac": {
+      "category": "public.app-category.books",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64", "x64"]
+        }
+      ]
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "wr0ngway",
+      "repo": "kindle-shelf"
+    }
   }
 }
