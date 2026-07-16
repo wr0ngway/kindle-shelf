@@ -771,6 +771,8 @@ $('refresh').addEventListener('click', () => {
 $('login').addEventListener('click', () => window.kindle.openLogin())
 
 restoreControls()
+if (window.kindle.getVersion)
+  window.kindle.getVersion().then((v) => { $('version').textContent = `v${v}` }).catch(() => {})
 ;(async () => {
   const data = await window.kindle.getBooks()
   if (data) {

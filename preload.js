@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('kindle', {
   getBooks: () => ipcRenderer.invoke('books:get'),
+  getVersion: () => ipcRenderer.invoke('version:get'),
   sync: () => ipcRenderer.invoke('sync'),
   openLogin: () => ipcRenderer.invoke('login:open'),
   openReader: (asin) => ipcRenderer.invoke('reader:open', asin),

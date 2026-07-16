@@ -271,3 +271,5 @@ button:disabled { opacity: 0.5; cursor: default; }
   color: #16a34a;
   font-weight: 600;
 }
+
+.version { color: var(--muted); font-size: 0.72rem; align-self: center; }

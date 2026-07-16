@@ -725,6 +725,7 @@ function saveSettings(s) {
 // Same UI + API, served over HTTP for phones/browsers. Login stays desktop-only.
 const remoteApi = {
   'GET /api/books': () => annotateBooks(loadBooks()),
+  'GET /api/version': () => ({ version: app.getVersion() }),
   'POST /api/sync': () => { doSync(); return { ok: true } },
   'POST /api/scan-start': () => { startScan(); return { ok: true } },
   'POST /api/scan-stop': () => { scanStopRequested = true; return { ok: true } },
@@ -811,6 +812,7 @@ async function remoteStatus() {
 }
 
 ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
+ipcMain.handle('version:get', () => app.getVersion())
 ipcMain.handle('override:set', (_e, asin, value) => applyOverride(asin, value))
 ipcMain.handle('remote:status', () => remoteStatus())
 ipcMain.handle('remote:set', async (_e, enabled) => {

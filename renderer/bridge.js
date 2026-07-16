@@ -44,6 +44,7 @@ if (!window.kindle) {
 
   window.kindle = {
     getBooks: () => call('/api/books'),
+    getVersion: () => call('/api/version').then((r) => r.version),
     sync: () => post('/api/sync'),
     openLogin: () =>
       alert('Amazon sign-in only works in the Kindle Shelf desktop app. Sign in there, then Refresh here.'),
