@@ -16,11 +16,25 @@ Catalog data (series contents, author catalogs, product details) comes from
 Amazon HTML pages fetched through a hidden window in the same session —
 a bare HTTP client trips Amazon's bot verification; a real renderer doesn't.
 
-## Usage
+## Install
+
+Download the latest build for your platform from
+[Releases](https://github.com/wr0ngway/kindle-shelf/releases) — the app is
+self-contained, no other dependencies needed. Everything (your Amazon
+session, book data, caches) stays on your machine.
+
+> **macOS note:** builds are unsigned, so the first launch needs
+> right-click → **Open** (or `xattr -cr "/Applications/Kindle Shelf.app"`)
+> to get past Gatekeeper's "unidentified developer" warning.
+
+Or run from source:
 
 ```sh
+npm install
 npm start
 ```
+
+## Usage
 
 - First launch: click **Sign in to Amazon**, log in (2FA included) in the
   embedded window. It closes itself once the session works, then syncs.
