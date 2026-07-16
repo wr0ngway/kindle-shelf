@@ -23,9 +23,13 @@ Download the latest build for your platform from
 self-contained, no other dependencies needed. Everything (your Amazon
 session, book data, caches) stays on your machine.
 
-> **macOS note:** builds are unsigned, so the first launch needs
-> right-click → **Open** (or `xattr -cr "/Applications/Kindle Shelf.app"`)
-> to get past Gatekeeper's "unidentified developer" warning.
+> **macOS note:** builds are not notarized, so Gatekeeper reports the
+> downloaded app as "damaged". After moving it to Applications, clear the
+> quarantine flag once, then it opens normally:
+>
+> ```sh
+> xattr -cr "/Applications/Kindle Shelf.app"
+> ```
 
 Or run from source:
 
