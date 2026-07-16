@@ -8,7 +8,24 @@ permissions:
   contents: write
 
 jobs:
+  # Create the draft release up front so the three build jobs attach their
+  # assets to it instead of racing to create one draft each.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft release for the tag
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "Kindle Shelf ${GITHUB_REF_NAME#v}" \
+            --notes "Draft — assets uploading." \
+            || echo "release already exists"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
+    needs: create-release
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
