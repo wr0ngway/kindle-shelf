@@ -1,6 +1,6 @@
 {
   "name": "kindle-shelf",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Which Kindle books (owned + Kindle Unlimited) have I already read, by author or series?",
   "author": "Matt Conway <matt@neurometric.ai>",
   "license": "MIT",
