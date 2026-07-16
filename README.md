@@ -3,6 +3,17 @@
 Answer "have I already read this author on Kindle?" — covers owned books **and**
 Kindle Unlimited borrows, including returned ones.
 
+## Why
+
+I've had a long-standing annoyance with the Amazon Kindle app: I read a lot
+of book series, and in its "Continue series you've started" view I have to
+wade through a list of not-yet-released books to find ones I can actually
+read — with no way to sort or filter any of it. Kindle Shelf is the view I
+wanted instead: every series I've started with the unread volumes listed,
+pre-orders filtered out by default, sortable and searchable, plus quick
+answers to "have I already read this author?" before borrowing something
+that only sounds new.
+
 Amazon has no official API for your personal library, so this is a small
 Electron app: the embedded browser is where you sign in to Amazon (session
 persists inside the app), and syncs hit Amazon's internal JSON endpoints
