@@ -64,4 +64,56 @@ if (!window.kindle) {
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost'))
     navigator.serviceWorker.register('/sw.js').catch(() => {})
+
+  // ---- install-as-app promotion ----
+  // Browsers never auto-install a PWA; best available UX is an in-page
+  // button wired to Chrome's beforeinstallprompt, with instructions as
+  // fallback (iOS has no install event at all).
+  let installPrompt = null
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    installPrompt = e
+  })
+
+  function showInstallBanner() {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone
+    if (standalone || localStorage.getItem('ks-install-dismissed')) return
+
+    const banner = document.createElement('div')
+    banner.className = 'install-banner'
+    const dismiss = () => {
+      localStorage.setItem('ks-install-dismissed', '1')
+      banner.remove()
+    }
+
+    if (installPrompt) {
+      const btn = document.createElement('button')
+      btn.className = 'primary'
+      btn.textContent = '📲 Install Kindle Shelf'
+      btn.addEventListener('click', async () => {
+        installPrompt.prompt()
+        const choice = await installPrompt.userChoice
+        if (choice.outcome === 'accepted') banner.remove()
+        installPrompt = null
+      })
+      banner.append(btn)
+    } else if (/iphone|ipad|ipod/i.test(navigator.userAgent)) {
+      banner.append('Install as app: tap Share, then “Add to Home Screen”')
+    } else {
+      banner.append('Install as app: browser menu ⋮ → “Install app” / “Add to Home Screen”')
+    }
+
+    const x = document.createElement('button')
+    x.className = 'install-dismiss'
+    x.textContent = '✕'
+    x.title = "Don't show again"
+    x.addEventListener('click', dismiss)
+    banner.append(x)
+    document.body.append(banner)
+    window.addEventListener('appinstalled', () => banner.remove())
+  }
+
+  // Give beforeinstallprompt a moment to fire before choosing which UI to show.
+  window.addEventListener('load', () => setTimeout(showInstallBanner, 2500))
 }
