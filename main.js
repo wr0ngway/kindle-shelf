@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, session, shell, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -559,6 +559,103 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   })
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  // Close hides instead of quitting so the remote server stays up
+  // (always-on); really quit via the tray menu, Cmd+Q, or app menu.
+  win.on('close', (e) => {
+    if (!quitting && !SMOKE) {
+      e.preventDefault()
+      win.hide()
+    }
+  })
+}
+
+// ---------- tray / background mode ----------
+
+let tray = null
+let quitting = false
+
+const backgroundSettings = () => ({ startAtLogin: false, hideDock: false, ...(loadSettings().background || {}) })
+function saveBackground(patch) {
+  const s = loadSettings()
+  s.background = { ...backgroundSettings(), ...patch }
+  saveSettings(s)
+}
+
+function setLinuxAutostart(enable) {
+  const dir = path.join(os.homedir(), '.config', 'autostart')
+  const file = path.join(dir, 'kindle-shelf.desktop')
+  if (!enable) {
+    try { fs.unlinkSync(file) } catch {}
+    return
+  }
+  fs.mkdirSync(dir, { recursive: true })
+  const exec = process.env.APPIMAGE || process.execPath
+  fs.writeFileSync(file,
+    `[Desktop Entry]\nType=Application\nName=Kindle Shelf\nExec="${exec}"\nX-GNOME-Autostart-enabled=true\n`)
+}
+
+function startAtLoginEnabled() {
+  if (process.platform === 'linux') return backgroundSettings().startAtLogin
+  return app.getLoginItemSettings().openAtLogin
+}
+
+function setStartAtLogin(enable) {
+  if (process.platform === 'linux') setLinuxAutostart(enable)
+  else app.setLoginItemSettings({ openAtLogin: enable })
+  saveBackground({ startAtLogin: enable })
+}
+
+function applyDockVisibility() {
+  if (process.platform !== 'darwin' || !app.dock) return
+  if (backgroundSettings().hideDock) app.dock.hide()
+  else app.dock.show()
+}
+
+function showWindow() {
+  if (!win || win.isDestroyed()) createWindow()
+  else {
+    win.show()
+    win.focus()
+  }
+}
+
+function refreshTray() {
+  if (!tray) return
+  const remoteOn = Boolean(remoteHandle)
+  const items = [
+    { label: 'Open Kindle Shelf', click: showWindow },
+    { label: 'Sync now', click: () => doSync() },
+    { label: remoteOn ? '📱 Remote access: on' : '📱 Remote access: off', enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Start at login',
+      type: 'checkbox',
+      checked: startAtLoginEnabled(),
+      click: (item) => { setStartAtLogin(item.checked); refreshTray() },
+    },
+  ]
+  if (process.platform === 'darwin')
+    items.push({
+      label: 'Hide Dock icon',
+      type: 'checkbox',
+      checked: backgroundSettings().hideDock,
+      click: (item) => { saveBackground({ hideDock: item.checked }); applyDockVisibility(); refreshTray() },
+    })
+  items.push({ type: 'separator' }, {
+    label: 'Quit Kindle Shelf',
+    click: () => { quitting = true; app.quit() },
+  })
+  tray.setToolTip(`Kindle Shelf${remoteOn ? ' — remote access on' : ''}`)
+  tray.setContextMenu(Menu.buildFromTemplate(items))
+}
+
+function createTray() {
+  const icons = path.join(__dirname, 'renderer', 'icons')
+  const icon = process.platform === 'darwin'
+    ? path.join(icons, 'trayTemplate.png') // 'Template' name → auto dark/light adaption
+    : nativeImage.createFromPath(path.join(icons, 'icon-192.png')).resize({ width: 16, height: 16 })
+  tray = new Tray(icon)
+  refreshTray()
 }
 
 // ---------- ipc ----------
@@ -719,6 +816,7 @@ ipcMain.handle('remote:status', () => remoteStatus())
 ipcMain.handle('remote:set', async (_e, enabled) => {
   if (enabled) await startRemote()
   else stopRemote()
+  refreshTray()
   return remoteStatus()
 })
 ipcMain.handle('remote:regen', () => {
@@ -769,8 +867,14 @@ ipcMain.handle('author:catalog', (_e, name, opts) => authorCatalog(name, opts ||
 app.whenReady().then(() => {
   ses().setUserAgent(USER_AGENT)
   createWindow()
-  if (!SMOKE && loadSettings().remote?.enabled)
-    startRemote().catch((e) => console.log('[remote] failed to start:', String(e.message || e)))
+  if (!SMOKE) {
+    createTray()
+    applyDockVisibility()
+    if (loadSettings().remote?.enabled)
+      startRemote()
+        .then(refreshTray)
+        .catch((e) => console.log('[remote] failed to start:', String(e.message || e)))
+  }
 
   if (SMOKE) {
     const errors = []
@@ -788,4 +892,10 @@ app.whenReady().then(() => {
   }
 })
 
-app.on('window-all-closed', () => app.quit())
+// Keep running in the background (tray + remote server) when windows close;
+// quit only via tray menu / Cmd+Q.
+app.on('window-all-closed', () => {
+  if (SMOKE) app.quit()
+})
+app.on('before-quit', () => { quitting = true })
+app.on('activate', () => showWindow())

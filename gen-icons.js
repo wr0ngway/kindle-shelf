@@ -17,6 +17,22 @@ app.whenReady().then(async () => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'icon-512.png'), img.resize({ width: 512 }).toPNG())
   fs.writeFileSync(path.join(dir, 'icon-192.png'), img.resize({ width: 192 }).toPNG())
+
+  // macOS menu-bar template icon: pure black + alpha (books on a shelf),
+  // drawn on canvas so transparency survives.
+  const { nativeImage } = require('electron')
+  const dataUrl = await win.webContents.executeJavaScript(`(() => {
+    const c = document.createElement('canvas'); c.width = 32; c.height = 32
+    const g = c.getContext('2d'); g.fillStyle = '#000'
+    g.fillRect(3, 8, 6, 19)   // book 1
+    g.fillRect(11, 4, 6, 23)  // book 2 (taller)
+    g.fillRect(19, 10, 6, 17) // book 3, slightly tilted look via offset
+    g.fillRect(2, 28, 28, 2)  // shelf
+    return c.toDataURL('image/png')
+  })()`)
+  const trayImg = nativeImage.createFromDataURL(dataUrl)
+  fs.writeFileSync(path.join(dir, 'trayTemplate@2x.png'), trayImg.toPNG())
+  fs.writeFileSync(path.join(dir, 'trayTemplate.png'), trayImg.resize({ width: 16, height: 16 }).toPNG())
   console.log('icons written to renderer/icons/')
   app.exit(0)
 })

@@ -91,6 +91,13 @@ Data, caches, and the Amazon session live under
 `~/Library/Application Support/kindle-shelf/` (`books.json`, `cache/`,
 `raw/` for debugging). Delete the directory to log out / reset.
 
+## Always-on / menu bar
+
+Kindle Shelf keeps running when you close the window (so remote access and
+background scans stay up) — a book icon lives in the menu bar / system tray
+with **Open**, **Sync now**, **Start at login**, **Hide Dock icon** (macOS),
+and **Quit**. Closing the window hides it; quit from the tray menu or Cmd+Q.
+
 ## Remote access (phone)
 
 Click the 📱 button to serve the same app to your phone's browser. Access is
