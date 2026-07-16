@@ -735,6 +735,14 @@ ipcMain.handle('remote:tailscale', async (_e, enable) => {
     else await tailscale.disableServe()
     return await remoteStatus()
   } catch (e) {
+    if (e.enableUrl) {
+      shell.openExternal(e.enableUrl)
+      return {
+        error:
+          'One-time Tailscale approval needed — a browser page just opened: ' +
+          'click “Enable Serve” there, then press this button again.',
+      }
+    }
     let error = String(e.message || e)
     if (/cert|https|magicdns/i.test(error))
       error += ' — enable MagicDNS and HTTPS certificates in the Tailscale admin console (DNS tab), then retry.'
