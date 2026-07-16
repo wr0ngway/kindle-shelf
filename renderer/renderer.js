@@ -663,9 +663,9 @@ function renderTailscaleSection(body, st) {
     body.append(el('p', 'summary',
       'Gives a stable https://…ts.net address reachable from anywhere on your tailnet ' +
       '(and only your tailnet), with a trusted certificate — required for full PWA install. ' +
-      'First use needs a one-time approval page: keep “HTTPS certificates” checked but ' +
-      'uncheck “Tailscale Funnel” — Funnel is public-internet exposure, which this app ' +
-      'should never have.'))
+      'First use opens a one-time approval page: keep “HTTPS certificates” checked; ' +
+      '“Tailscale Funnel” is optional — Kindle Shelf never uses it and stays tailnet-only ' +
+      'either way.'))
     return
   }
 

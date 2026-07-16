@@ -107,10 +107,11 @@ LAN address (same Wi-Fi only). The panel walks through the whole setup
 (download links, sign-in, phone app QR) if Tailscale isn't installed yet.
 
 > **First-time Serve approval:** the first HTTPS enable opens Tailscale's
-> "Start using Serve" page. Keep **HTTPS certificates** checked, but
-> **uncheck "Tailscale Funnel (optional)"** — it's pre-checked, and Funnel
-> routes traffic from the *public internet* to your devices. Kindle Shelf
-> only needs Serve (tailnet-only) and never uses Funnel; don't grant it.
+> "Start using Serve" page. Keep **HTTPS certificates** checked. The
+> pre-checked **"Tailscale Funnel (optional)"** grants your tailnet the
+> ability to publish services to the public internet — Kindle Shelf never
+> uses Funnel and stays tailnet-only either way, so uncheck it unless you
+> want that capability for other things.
 
 Amazon sign-in stays desktop-only; the phone is a client of the desktop app's
 session. Don't port-forward the remote port to the public internet — the
