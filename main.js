@@ -1,9 +1,14 @@
 const { app, BrowserWindow, ipcMain, session, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
+const crypto = require('crypto')
+const QRCode = require('qrcode')
 const {
   createAmazon, decodeEntities, splitAuthors, guessSeries, seriesKey, USER_AGENT,
 } = require('./lib/amazon')
+const { createRemoteServer } = require('./lib/server')
+const tailscale = require('./lib/tailscale')
 
 // Same data dir in dev and packaged builds (packaged would otherwise derive
 // it from the product name "Kindle Shelf"), so session + caches carry over.
@@ -22,6 +27,7 @@ let win = null
 let loginWin = null
 let loginPoll = null
 let syncing = false
+let remoteHandle = null
 
 const ses = () => session.fromPartition(PARTITION)
 const dataFile = () => path.join(app.getPath('userData'), 'books.json')
@@ -207,9 +213,14 @@ function mergeBooks(owned, mycdItems) {
   return list
 }
 
+function broadcast(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+  if (remoteHandle) remoteHandle.broadcast(channel, payload)
+}
+
 function send(state) {
   console.log('[sync]', JSON.stringify(state).slice(0, 300))
-  if (win && !win.isDestroyed()) win.webContents.send('sync-state', state)
+  broadcast('sync-state', state)
 }
 
 function loadBooks() {
@@ -436,7 +447,7 @@ let scanning = false
 let scanStopRequested = false
 
 function sendScan(evt) {
-  if (win && !win.isDestroyed()) win.webContents.send('scan-state', evt)
+  broadcast('scan-state', evt)
 }
 
 async function startScan() {
@@ -552,8 +563,7 @@ function createWindow() {
 
 // ---------- ipc ----------
 
-ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
-ipcMain.handle('override:set', async (_e, asin, value) => {
+async function applyOverride(asin, value) {
   if (![null, 'read', 'unread'].includes(value)) throw new Error('bad override value')
   const data = loadBooks()
   const book = (data?.books || []).find((b) => b.asin === asin) || null
@@ -586,15 +596,10 @@ ipcMain.handle('override:set', async (_e, asin, value) => {
     setOverride(asin, null)
   }
   return { amazonSynced, amazonError }
-})
-ipcMain.handle('sync', () => { doSync() })
-ipcMain.handle('login:open', () => { openLogin() })
-ipcMain.handle('reader:open', (_e, asin) => { openReader(asin) })
-ipcMain.handle('external:open', (_e, url) => {
-  if (/^https:\/\/(www|read|smile)\.amazon\.com\//.test(url)) shell.openExternal(url)
-})
-ipcMain.handle('details:get', async (_e, asin, opts) => {
-  const meta = await getMeta(asin, opts || {})
+}
+
+async function getDetailsPayload(asin, opts = {}) {
+  const meta = await getMeta(asin, opts)
   const data = loadBooks()
   const book = (data?.books || []).find((b) => b.asin === asin) || null
   const ov = loadOverrides()[asin] || null
@@ -604,7 +609,129 @@ ipcMain.handle('details:get', async (_e, asin, opts) => {
     override: ov,
     read: effectiveRead(Boolean(book), book?.amazonReadStatus === 'READ', ov),
   }
+}
+
+// ---------- remote access ----------
+
+const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
+function loadSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+function saveSettings(s) {
+  fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 1))
+}
+
+// Same UI + API, served over HTTP for phones/browsers. Login stays desktop-only.
+const remoteApi = {
+  'GET /api/books': () => annotateBooks(loadBooks()),
+  'POST /api/sync': () => { doSync(); return { ok: true } },
+  'POST /api/scan-start': () => { startScan(); return { ok: true } },
+  'POST /api/scan-stop': () => { scanStopRequested = true; return { ok: true } },
+  'GET /api/details': ({ query }) =>
+    getDetailsPayload(query.get('asin'), { force: query.get('force') === '1' }),
+  'GET /api/series-groups': () => computeSeriesGroups(),
+  'POST /api/series-check': ({ body }) => checkSeries(body.key, { force: Boolean(body.force) }),
+  'POST /api/author': ({ body }) => authorCatalog(body.name, { force: Boolean(body.force) }),
+  'POST /api/override': ({ body }) => applyOverride(body.asin, body.value ?? null),
+}
+
+async function startRemote() {
+  if (remoteHandle) return
+  const s = loadSettings()
+  s.remote = s.remote || {}
+  s.remote.token = s.remote.token || crypto.randomBytes(16).toString('hex')
+  s.remote.port = s.remote.port || 8787
+  s.remote.enabled = true
+  saveSettings(s)
+  remoteHandle = await createRemoteServer({
+    port: s.remote.port,
+    staticDir: path.join(__dirname, 'renderer'),
+    getToken: () => loadSettings().remote?.token,
+    api: remoteApi,
+    log: (m) => console.log('[remote]', m),
+  })
+}
+
+function stopRemote() {
+  if (remoteHandle) remoteHandle.close()
+  remoteHandle = null
+  const s = loadSettings()
+  if (s.remote) s.remote.enabled = false
+  saveSettings(s)
+}
+
+function lanIp() {
+  for (const addrs of Object.values(os.networkInterfaces()))
+    for (const a of addrs || []) {
+      if (a.family !== 'IPv4' || a.internal || a.address.startsWith('169.254')) continue
+      const [x, y] = a.address.split('.').map(Number)
+      if (x === 100 && y >= 64 && y <= 127) continue // tailscale CGNAT range
+      return a.address
+    }
+  return null
+}
+
+async function remoteStatus() {
+  const s = loadSettings()
+  const enabled = Boolean(remoteHandle)
+  const ts = await tailscale.status()
+  const port = s.remote?.port || 8787
+  const serveActive = enabled && ts.available ? await tailscale.serveActive(port) : false
+
+  const urls = []
+  if (enabled) {
+    if (serveActive && ts.dnsName) urls.push({ label: 'Tailscale HTTPS', url: `https://${ts.dnsName}` })
+    if (ts.available && ts.ip) urls.push({ label: 'Tailscale', url: `http://${ts.ip}:${port}` })
+    const lan = lanIp()
+    if (lan) urls.push({ label: 'Wi-Fi (LAN)', url: `http://${lan}:${port}` })
+    for (const u of urls)
+      u.qr = await QRCode.toDataURL(`${u.url}/?token=${s.remote.token}`, { width: 300, margin: 1 })
+  }
+  return {
+    enabled,
+    port,
+    token: s.remote?.token || null,
+    urls,
+    tailscale: { ...ts, serveActive },
+  }
+}
+
+ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
+ipcMain.handle('override:set', (_e, asin, value) => applyOverride(asin, value))
+ipcMain.handle('remote:status', () => remoteStatus())
+ipcMain.handle('remote:set', async (_e, enabled) => {
+  if (enabled) await startRemote()
+  else stopRemote()
+  return remoteStatus()
 })
+ipcMain.handle('remote:regen', () => {
+  const s = loadSettings()
+  s.remote = s.remote || {}
+  s.remote.token = crypto.randomBytes(16).toString('hex')
+  saveSettings(s)
+  return remoteStatus()
+})
+ipcMain.handle('remote:tailscale', async (_e, enable) => {
+  try {
+    const s = loadSettings()
+    if (enable) await tailscale.enableServe(s.remote?.port || 8787)
+    else await tailscale.disableServe()
+    return await remoteStatus()
+  } catch (e) {
+    return { error: String(e.message || e) }
+  }
+})
+ipcMain.handle('sync', () => { doSync() })
+ipcMain.handle('login:open', () => { openLogin() })
+ipcMain.handle('reader:open', (_e, asin) => { openReader(asin) })
+ipcMain.handle('external:open', (_e, url) => {
+  if (/^https:\/\/(www|read|smile)\.amazon\.com\//.test(url)) shell.openExternal(url)
+})
+ipcMain.handle('details:get', (_e, asin, opts) => getDetailsPayload(asin, opts || {}))
 ipcMain.handle('series:groups', () => computeSeriesGroups())
 ipcMain.handle('scan:start', () => { startScan() })
 ipcMain.handle('scan:stop', () => { scanStopRequested = true })
@@ -614,6 +741,8 @@ ipcMain.handle('author:catalog', (_e, name, opts) => authorCatalog(name, opts ||
 app.whenReady().then(() => {
   ses().setUserAgent(USER_AGENT)
   createWindow()
+  if (!SMOKE && loadSettings().remote?.enabled)
+    startRemote().catch((e) => console.log('[remote] failed to start:', String(e.message || e)))
 
   if (SMOKE) {
     const errors = []

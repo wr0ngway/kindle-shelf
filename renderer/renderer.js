@@ -549,8 +549,104 @@ async function openDetails(asin) {
 
 $('details-close').addEventListener('click', () => $('details').classList.add('hidden'))
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') $('details').classList.add('hidden')
+  if (e.key === 'Escape') {
+    $('details').classList.add('hidden')
+    $('remote-panel').classList.add('hidden')
+  }
 })
+
+// ---------- remote access panel (desktop only) ----------
+
+const remoteSupported = typeof window.kindle.remoteStatus === 'function'
+if (!remoteSupported) $('remote-btn').classList.add('hidden')
+
+let remoteSelectedUrl = null
+
+async function openRemotePanel() {
+  const body = $('remote-body')
+  $('remote-panel').classList.remove('hidden')
+  body.replaceChildren(el('div', 'summary', 'Loading…'))
+  const st = await window.kindle.remoteStatus()
+  body.replaceChildren()
+  body.append(el('h2', null, 'Remote access'))
+  body.append(el('p', 'summary',
+    'Serve this app to your phone’s browser. Access is gated by a token baked into the QR code; ' +
+    'once scanned, the phone stays signed in.'))
+
+  const toggle = el('button', st.enabled ? '' : 'primary',
+    st.enabled ? 'Disable remote access' : 'Enable remote access')
+  toggle.addEventListener('click', async () => {
+    toggle.disabled = true
+    await window.kindle.remoteSet(!st.enabled)
+    openRemotePanel()
+  })
+  body.append(toggle)
+  if (!st.enabled) return
+
+  const urls = st.urls || []
+  if (!urls.length) {
+    body.append(el('p', 'summary', 'No reachable network addresses found.'))
+  } else {
+    const selected = urls.find((u) => u.url === remoteSelectedUrl) || urls[0]
+    const chips = el('div', 'chips')
+    for (const u of urls) {
+      const c = el('button', `chip ${u.url === selected.url ? 'active' : ''}`, u.label)
+      c.addEventListener('click', () => { remoteSelectedUrl = u.url; openRemotePanel() })
+      chips.append(c)
+    }
+    body.append(chips)
+    const qr = el('img', 'qr')
+    qr.src = selected.qr
+    body.append(qr)
+    body.append(el('div', 'summary mono', selected.url))
+  }
+
+  body.append(el('h3', null, 'Phone setup'))
+  body.append(el('p', 'summary',
+    '1. Scan the QR (phone on the same Wi-Fi, or on your tailnet for the Tailscale addresses). ' +
+    '2. The token is stored in the phone browser — no sign-in after that. ' +
+    '3. Use “Add to Home Screen” for an app-like launch.'))
+
+  body.append(el('h3', null, 'Tailscale'))
+  if (!st.tailscale?.available) {
+    body.append(el('p', 'summary',
+      'Tailscale not detected. Install it on this Mac and your phone (tailscale.com) to reach ' +
+      'Kindle Shelf securely from anywhere — not just this Wi-Fi — with an HTTPS address that ' +
+      'enables full PWA install. Never exposed to the public internet.'))
+  } else {
+    body.append(el('div', 'summary', `Tailnet address: ${st.tailscale.dnsName || st.tailscale.ip}`))
+    const ts = el('button', null, st.tailscale.serveActive
+      ? 'Disable HTTPS address (tailscale serve)'
+      : 'Enable HTTPS address (tailscale serve)')
+    ts.addEventListener('click', async () => {
+      ts.disabled = true
+      ts.textContent = 'Working…'
+      const r = await window.kindle.remoteTailscale(!st.tailscale.serveActive)
+      if (r?.error) alert(`Tailscale: ${r.error}`)
+      openRemotePanel()
+    })
+    body.append(ts)
+    body.append(el('p', 'summary',
+      'Gives a stable https://…ts.net address reachable from anywhere on your tailnet ' +
+      '(and only your tailnet), with a trusted certificate — required for full PWA install.'))
+  }
+
+  body.append(el('h3', null, 'Access token'))
+  body.append(el('div', 'summary mono', st.token || '—'))
+  const regen = el('button', null, 'Regenerate token')
+  regen.title = 'Revokes access for every device that scanned the old QR'
+  regen.addEventListener('click', async () => {
+    regen.disabled = true
+    await window.kindle.remoteRegen()
+    openRemotePanel()
+  })
+  body.append(regen)
+}
+
+if (remoteSupported) {
+  $('remote-btn').addEventListener('click', openRemotePanel)
+  $('remote-close').addEventListener('click', () => $('remote-panel').classList.add('hidden'))
+}
 
 // ---------- sync plumbing ----------
 

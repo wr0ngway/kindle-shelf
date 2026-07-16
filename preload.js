@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('kindle', {
   setOverride: (asin, value) => ipcRenderer.invoke('override:set', asin, value),
   scanStart: () => ipcRenderer.invoke('scan:start'),
   scanStop: () => ipcRenderer.invoke('scan:stop'),
+  remoteStatus: () => ipcRenderer.invoke('remote:status'),
+  remoteSet: (enabled) => ipcRenderer.invoke('remote:set', enabled),
+  remoteRegen: () => ipcRenderer.invoke('remote:regen'),
+  remoteTailscale: (enable) => ipcRenderer.invoke('remote:tailscale', enable),
   onSyncState: (cb) => ipcRenderer.on('sync-state', (_e, s) => cb(s)),
   onScanState: (cb) => ipcRenderer.on('scan-state', (_e, s) => cb(s)),
 })

@@ -19,7 +19,8 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "cheerio": "^1.2.0"
+    "cheerio": "^1.2.0",
+    "qrcode": "^1.5.4"
   },
   "build": {
     "appId": "dev.wr0ngway.kindle-shelf",
@@ -35,11 +36,17 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ]
     },
@@ -47,7 +54,9 @@
       "target": "nsis"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility"
     },
     "publish": {

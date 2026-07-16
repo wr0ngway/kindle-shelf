@@ -91,10 +91,30 @@ Data, caches, and the Amazon session live under
 `~/Library/Application Support/kindle-shelf/` (`books.json`, `cache/`,
 `raw/` for debugging). Delete the directory to log out / reset.
 
+## Remote access (phone)
+
+Click the 📱 button to serve the same app to your phone's browser. Access is
+gated by a persistent random token: scan the QR code once (it encodes the URL
+with the token), and the phone exchanges it for a long-lived cookie — no
+sign-in after that. "Add to Home Screen" gives an app-like launch.
+Regenerating the token revokes every device.
+
+With [Tailscale](https://tailscale.com) installed, one button runs
+`tailscale serve` to add a stable `https://…ts.net` address that works from
+anywhere on your tailnet (and only your tailnet) with a trusted certificate —
+which also unlocks full PWA install on Android. Without it, the QR uses your
+LAN address (same Wi-Fi only).
+
+Amazon sign-in stays desktop-only; the phone is a client of the desktop app's
+session. Don't port-forward the remote port to the public internet — the
+server fronts your Amazon session. LAN + Tailscale is the intended posture.
+
 ## Dev helpers
 
 `probe.js` and `test-parse.js` run one-off fetches/parses against the live
 session (`npx electron probe.js`) — useful when Amazon changes page shapes.
+`test-browser.js` simulates a phone browser against the remote server;
+`gen-icons.js` regenerates the PWA icons.
 
 ## Caveats
 
