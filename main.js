@@ -5,6 +5,10 @@ const {
   createAmazon, decodeEntities, splitAuthors, guessSeries, seriesKey, USER_AGENT,
 } = require('./lib/amazon')
 
+// Same data dir in dev and packaged builds (packaged would otherwise derive
+// it from the product name "Kindle Shelf"), so session + caches carry over.
+app.setPath('userData', path.join(app.getPath('appData'), 'kindle-shelf'))
+
 const PARTITION = 'persist:amazon'
 const LIBRARY_URL = 'https://read.amazon.com/kindle-library'
 const SEARCH_URL = 'https://read.amazon.com/kindle-library/search'
