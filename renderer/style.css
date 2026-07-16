@@ -265,3 +265,9 @@ button:disabled { opacity: 0.5; cursor: default; }
   max-width: 92vw;
 }
 .install-dismiss { border: none; background: none; color: var(--muted); padding: 0.1rem 0.3rem; }
+
+#remote-btn.remote-on {
+  border-color: #16a34a;
+  color: #16a34a;
+  font-weight: 600;
+}

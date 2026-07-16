@@ -560,6 +560,15 @@ document.addEventListener('keydown', (e) => {
 const remoteSupported = typeof window.kindle.remoteStatus === 'function'
 if (!remoteSupported) $('remote-btn').classList.add('hidden')
 
+function updateRemoteButton(st) {
+  const btn = $('remote-btn')
+  btn.classList.toggle('remote-on', st.enabled)
+  btn.textContent = st.enabled ? '📱 On' : '📱'
+  btn.title = st.enabled
+    ? `Remote access is ON — ${(st.urls || []).map((u) => u.url).join('  ·  ') || 'no addresses found'}`
+    : 'Remote access (phone)'
+}
+
 let remoteSelectedUrl = null
 
 async function openRemotePanel() {
@@ -567,6 +576,7 @@ async function openRemotePanel() {
   $('remote-panel').classList.remove('hidden')
   if (!body.childElementCount) body.replaceChildren(el('div', 'summary', 'Loading…'))
   const st = await window.kindle.remoteStatus()
+  updateRemoteButton(st)
   body.replaceChildren()
   body.append(el('h2', null, 'Remote access'))
   body.append(el('p', 'summary',
@@ -723,6 +733,7 @@ function closeRemotePanel() {
 if (remoteSupported) {
   $('remote-btn').addEventListener('click', openRemotePanel)
   $('remote-close').addEventListener('click', closeRemotePanel)
+  window.kindle.remoteStatus().then(updateRemoteButton).catch(() => {})
 }
 
 // ---------- sync plumbing ----------
