@@ -3,6 +3,8 @@
 Answer "have I already read this author on Kindle?" — covers owned books **and**
 Kindle Unlimited borrows, including returned ones.
 
+![Library grouped by series with unread volumes](docs/screenshots/library-series.png)
+
 ## Why
 
 I've had a long-standing annoyance with the Amazon Kindle app: I read a lot
@@ -76,6 +78,8 @@ catalog, grouped by series, with read/unread badges. Filters: *Unread only*,
 *Released only*. If the search mixes several same-named authors, chips let
 you pick the one you meant.
 
+![Author catalog with read/unread badges](docs/screenshots/author-view.png)
+
 **Read status** — presence in your library counts as read; Amazon's own
 read-state record (the Kindle apps' "Mark as read") is imported on every
 sync and is authoritative. Marking read/unread in the app pushes to Amazon;
@@ -86,6 +90,8 @@ record supersedes it.
 **Book details** — click any book row: cover, synopsis, rating, reviews,
 release date, and **📖 Read with Kindle** (opens the book in an embedded
 Kindle Cloud Reader window) or **View on Amazon**.
+
+![Book details drawer](docs/screenshots/details.png)
 
 Data, caches, and the Amazon session live under
 `~/Library/Application Support/kindle-shelf/` (`books.json`, `cache/`,
@@ -99,6 +105,8 @@ with **Open**, **Sync now**, **Start at login**, **Hide Dock icon** (macOS),
 and **Quit**. Closing the window hides it; quit from the tray menu or Cmd+Q.
 
 ## Remote access (phone)
+
+<img src="docs/screenshots/phone.png" alt="Phone reading-queue view" width="320" align="right" />
 
 Click the 📱 button to serve the same app to your phone's browser. Access is
 gated by a persistent random token: scan the QR code once (it encodes the URL

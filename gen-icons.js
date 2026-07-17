@@ -1,38 +1,85 @@
-// Dev-only: render the PWA/app icons with Electron. Run: npx electron gen-icons.js
-const { app, BrowserWindow } = require('electron')
+// Dev-only: render all app icons from one books-on-a-shelf design.
+// Run: npx electron gen-icons.js
+// Outputs:
+//   build/icon.png          1024px, macOS-style margin + rounded rect (electron-builder
+//                           converts to .icns/.ico for mac/win/linux)
+//   renderer/icons/icon-512.png, icon-192.png   full-bleed PWA icons
+//   renderer/icons/trayTemplate.png (+@2x)      black+alpha menu-bar silhouette
+const { app, BrowserWindow, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
-app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 512, height: 512, frame: false })
-  const html = `<body style="margin:0">
-    <div style="width:512px;height:512px;display:flex;align-items:center;justify-content:center;
-                background:linear-gradient(135deg,#92400e,#f59e0b);border-radius:0">
-      <div style="font-size:300px;line-height:1">📚</div>
-    </div></body>`
-  await win.loadURL('data:text/html,' + encodeURIComponent(html))
-  await new Promise((r) => setTimeout(r, 800))
-  const img = await win.webContents.capturePage()
-  const dir = path.join(__dirname, 'renderer', 'icons')
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(path.join(dir, 'icon-512.png'), img.resize({ width: 512 }).toPNG())
-  fs.writeFileSync(path.join(dir, 'icon-192.png'), img.resize({ width: 192 }).toPNG())
+// Draw routine shared by every variant. Books-on-a-shelf on a 100-unit box.
+const DRAW = `
+function drawArt(g, S, opts) {
+  const u = S / 100
+  if (opts.bg) {
+    const m = opts.margin * u
+    const r = opts.radius * u
+    const grad = g.createLinearGradient(m, m, S - m, S - m)
+    grad.addColorStop(0, '#b45309')
+    grad.addColorStop(1, '#f59e0b')
+    g.fillStyle = grad
+    g.beginPath()
+    g.roundRect(m, m, S - 2 * m, S - 2 * m, r)
+    g.fill()
+  }
+  // Content box for the books (relative to the 100-unit grid)
+  const pad = (opts.margin + opts.inset) * u
+  const w = S - 2 * pad
+  const x = (f) => pad + f * w
+  const y = (f) => pad + f * w
+  g.fillStyle = opts.ink
+  const bw = 0.17 * w // book spine width
+  const shelfY = 0.86
+  // three spines of differing heights, resting on the shelf
+  g.beginPath(); g.roundRect(x(0.08), y(0.22), bw, y(shelfY) - y(0.22), 2 * u); g.fill()
+  g.beginPath(); g.roundRect(x(0.32), y(0.06), bw, y(shelfY) - y(0.06), 2 * u); g.fill()
+  g.beginPath(); g.roundRect(x(0.56), y(0.28), bw, y(shelfY) - y(0.28), 2 * u); g.fill()
+  // leaning book
+  g.save()
+  g.translate(x(0.78), y(shelfY))
+  g.rotate(-0.22)
+  g.beginPath(); g.roundRect(0, -(y(shelfY) - y(0.30)), bw, y(shelfY) - y(0.30), 2 * u); g.fill()
+  g.restore()
+  // shelf
+  g.beginPath(); g.roundRect(x(0), y(shelfY), w, 0.055 * w, 1.5 * u); g.fill()
+}
+`
 
-  // macOS menu-bar template icon: pure black + alpha (books on a shelf),
-  // drawn on canvas so transparency survives.
-  const { nativeImage } = require('electron')
+async function render(win, size, opts) {
   const dataUrl = await win.webContents.executeJavaScript(`(() => {
-    const c = document.createElement('canvas'); c.width = 32; c.height = 32
-    const g = c.getContext('2d'); g.fillStyle = '#000'
-    g.fillRect(3, 8, 6, 19)   // book 1
-    g.fillRect(11, 4, 6, 23)  // book 2 (taller)
-    g.fillRect(19, 10, 6, 17) // book 3, slightly tilted look via offset
-    g.fillRect(2, 28, 28, 2)  // shelf
+    ${DRAW}
+    const c = document.createElement('canvas'); c.width = ${size}; c.height = ${size}
+    drawArt(c.getContext('2d'), ${size}, ${JSON.stringify(opts)})
     return c.toDataURL('image/png')
   })()`)
-  const trayImg = nativeImage.createFromDataURL(dataUrl)
-  fs.writeFileSync(path.join(dir, 'trayTemplate@2x.png'), trayImg.toPNG())
-  fs.writeFileSync(path.join(dir, 'trayTemplate.png'), trayImg.resize({ width: 16, height: 16 }).toPNG())
-  console.log('icons written to renderer/icons/')
+  return nativeImage.createFromDataURL(dataUrl)
+}
+
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({ show: false, width: 200, height: 200 })
+  await win.loadURL('data:text/html,<body></body>')
+
+  const iconsDir = path.join(__dirname, 'renderer', 'icons')
+  const buildDir = path.join(__dirname, 'build')
+  fs.mkdirSync(iconsDir, { recursive: true })
+  fs.mkdirSync(buildDir, { recursive: true })
+
+  // App icon: macOS-style transparent margin, rounded square, cream books.
+  const appIcon = await render(win, 1024, { bg: true, margin: 8.5, radius: 18.5, inset: 14, ink: '#fffbeb' })
+  fs.writeFileSync(path.join(buildDir, 'icon.png'), appIcon.toPNG())
+
+  // PWA icons: full-bleed (maskable-friendly), same art.
+  const pwa = await render(win, 512, { bg: true, margin: 0, radius: 0, inset: 18, ink: '#fffbeb' })
+  fs.writeFileSync(path.join(iconsDir, 'icon-512.png'), pwa.toPNG())
+  fs.writeFileSync(path.join(iconsDir, 'icon-192.png'), pwa.resize({ width: 192 }).toPNG())
+
+  // Menu-bar template: same silhouette, pure black + alpha, no background.
+  const tray = await render(win, 32, { bg: false, margin: 0, radius: 0, inset: 2, ink: '#000000' })
+  fs.writeFileSync(path.join(iconsDir, 'trayTemplate@2x.png'), tray.toPNG())
+  fs.writeFileSync(path.join(iconsDir, 'trayTemplate.png'), tray.resize({ width: 16, height: 16 }).toPNG())
+
+  console.log('icons written: build/icon.png, renderer/icons/{icon-512,icon-192,trayTemplate,trayTemplate@2x}.png')
   app.exit(0)
 })

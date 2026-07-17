@@ -146,7 +146,7 @@ function bookRow(b, { showAuthors = true, extraBadges = [] } = {}) {
     li.append(badge('progress', `${b.percentageRead}% read`))
   for (const s of b.sources || []) li.append(badge(s))
   if (b.amazonRead) li.append(badge('progress', '✓ Finished'))
-  if (b.read === false) li.append(badge('unread', 'Marked unread'))
+  if (b.readOverride === 'unread' && b.read === false) li.append(badge('unread', 'Marked unread'))
   for (const x of extraBadges) li.append(x)
   li.addEventListener('click', () => openDetails(b.asin))
   return li
