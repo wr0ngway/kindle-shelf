@@ -377,7 +377,40 @@ window.kindle.onScanState((s) => {
 
 // ---------- author view ----------
 
-async function openAuthorView(name, { force = false } = {}) {
+// ---------- history integration ----------
+// Overlays and drill-downs push history states so the OS/browser back
+// gesture (Android swipe-back in the PWA) closes them instead of leaving
+// the app. UI close buttons go through history.back() to stay in sync.
+
+function pushViewState(s) {
+  if (history.state?.view === s.view) history.replaceState(s, '')
+  else history.pushState(s, '')
+}
+
+window.addEventListener('popstate', (e) => {
+  const s = e.state
+  if (!s) {
+    $('details').classList.add('hidden')
+    if (state.view !== 'library') showView('library')
+    return
+  }
+  if (s.view === 'author') {
+    $('details').classList.add('hidden')
+    if (state.author?.name === s.name) showView('author')
+    else openAuthorView(s.name, { fromHistory: true })
+  } else if (s.view === 'details') {
+    openDetails(s.asin, { fromHistory: true })
+  }
+})
+
+function closeDetails() {
+  if ($('details').classList.contains('hidden')) return
+  if (history.state?.view === 'details') history.back()
+  else $('details').classList.add('hidden')
+}
+
+async function openAuthorView(name, { force = false, fromHistory = false } = {}) {
+  if (!fromHistory) pushViewState({ view: 'author', name })
   showView('author')
   $('author-title').textContent = name
   $('author-chips').replaceChildren()
@@ -473,14 +506,18 @@ function renderAuthor() {
   if (!list.length) wrap.append(el('div', 'summary', 'Nothing matches the current filters.'))
 }
 
-$('author-back').addEventListener('click', () => showView('library'))
+$('author-back').addEventListener('click', () => {
+  if (history.state?.view === 'author') history.back()
+  else showView('library')
+})
 $('author-refresh').addEventListener('click', () => state.author && openAuthorView(state.author.name, { force: true }))
 $('author-unread-only').addEventListener('change', renderAuthor)
 $('author-released-only').addEventListener('change', renderAuthor)
 
 // ---------- details drawer ----------
 
-async function openDetails(asin) {
+async function openDetails(asin, { fromHistory = false } = {}) {
+  if (!fromHistory) pushViewState({ view: 'details', asin })
   const panel = $('details')
   const body = $('details-body')
   panel.classList.remove('hidden')
@@ -566,10 +603,10 @@ async function openDetails(asin) {
   }
 }
 
-$('details-close').addEventListener('click', () => $('details').classList.add('hidden'))
+$('details-close').addEventListener('click', closeDetails)
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    $('details').classList.add('hidden')
+    closeDetails()
     closeRemotePanel()
   }
 })
@@ -790,6 +827,7 @@ $('refresh').addEventListener('click', () => {
 $('login').addEventListener('click', () => window.kindle.openLogin())
 
 restoreControls()
+history.replaceState(null, '') // normalize the base history entry on load
 if (window.kindle.getVersion)
   window.kindle.getVersion().then((v) => { $('version').textContent = `v${v}` }).catch(() => {})
 ;(async () => {
