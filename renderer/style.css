@@ -104,7 +104,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.6rem;
   padding: 0.55rem 0.9rem;
   border: 1px solid var(--border);
@@ -115,6 +115,15 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .row:hover { border-color: var(--accent); }
 .title { font-weight: 550; }
+.thumb {
+  width: 34px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: var(--border);
+}
+.date { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 .authors { color: var(--muted); font-size: 0.9rem; flex: 1; }
 .author-link { color: inherit; text-decoration: underline dotted; }
 .author-link:hover { color: var(--accent); }

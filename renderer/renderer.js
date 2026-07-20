@@ -129,8 +129,16 @@ function markBtn(asin, read) {
   return b
 }
 
+function thumb(src) {
+  const img = el('img', 'thumb')
+  img.src = src
+  img.loading = 'lazy'
+  return img
+}
+
 function bookRow(b, { showAuthors = true, extraBadges = [] } = {}) {
   const li = el('div', 'row')
+  if (b.cover) li.append(thumb(b.cover))
   li.append(el('span', 'title', b.title))
   if (showAuthors) {
     const span = el('span', 'authors')
@@ -142,6 +150,7 @@ function bookRow(b, { showAuthors = true, extraBadges = [] } = {}) {
   } else {
     li.append(el('span', 'authors', ''))
   }
+  if (b.releaseDate) li.append(el('span', 'date', b.releaseDate))
   if (b.percentageRead > 0 && b.percentageRead < 100)
     li.append(badge('progress', `${b.percentageRead}% read`))
   for (const s of b.sources || []) li.append(badge(s))
@@ -167,6 +176,7 @@ function nextUnread(check, releasedOnly) {
 // Compact row for an unread volume of a series.
 function volumeRow(v) {
   const row = el('div', 'row next-row')
+  if (v.cover) row.append(thumb(v.cover))
   row.append(el('span', 'title', `#${v.position}  ${v.title}`))
   row.append(el('span', 'authors',
     v.released ? (v.releaseDate ? `released ${v.releaseDate}` : '') : `releases ${v.releaseDate || 'TBA'}`))
@@ -284,8 +294,17 @@ function renderLibraryGrouped(wrap, matches) {
     const head = el('h3')
     const maxNum = Math.max(0, ...g.books.map((b) => b.num ?? 0))
     const total = g.check?.total || g.total
+    head.append(`${g.check?.name || g.name}`)
+    // Most common author among your books in the series, as a clickable byline.
+    const counts = new Map()
+    for (const m of members) for (const a of m.authors || []) counts.set(a, (counts.get(a) || 0) + 1)
+    const topAuthor = [...counts.entries()].sort((x, y) => y[1] - x[1])[0]?.[0]
+    if (topAuthor) {
+      head.append(' · by ')
+      head.append(authorLink(topAuthor))
+    }
     head.append(
-      `${g.check?.name || g.name} · ${members.length} read` +
+      ` · ${members.length} read` +
       (maxNum ? ` · up to #${maxNum}` : '') +
       (total ? ` · ${total} in series` : ''))
     if (!g.check) {

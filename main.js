@@ -294,10 +294,16 @@ function effectiveRead(inLibrary, amazonRead, override) {
 function annotateBooks(data) {
   if (!data) return data
   const ov = loadOverrides()
+  // Release dates aren't in the library/KU sync data — enrich from the
+  // product-metadata cache (populated by details views and series checks).
+  const metaByAsin = new Map(allCached('meta', 365 * DAY).map((m) => [m.asin, m]))
   for (const b of data.books || []) {
     b.readOverride = ov[b.asin] || null
     b.amazonRead = b.amazonReadStatus === 'READ'
     b.read = effectiveRead(true, b.amazonRead, b.readOverride)
+    const m = metaByAsin.get(b.asin)
+    if (m?.releaseDate) b.releaseDate = m.releaseDate
+    if (!b.cover && m?.cover) b.cover = m.cover
   }
   return data
 }
