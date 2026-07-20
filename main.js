@@ -390,8 +390,31 @@ function computeSeriesGroups() {
     g.books.sort((a, b) => (a.num ?? 99) - (b.num ?? 99))
     g.check = annotateVolumes(readCache('series-check', g.key, 7 * DAY))
   }
-  out.sort((a, b) => a.recency - b.recency)
-  return out
+
+  // Name-based grouping can split one series across keys (metadata name vs
+  // title guess, subtitle variants). The series ASIN — from member metadata
+  // or a cached series check — is authoritative: merge groups that share it.
+  const byResolvedAsin = new Map()
+  const merged = []
+  for (const g of out) {
+    const asin = g.seriesAsin || g.check?.seriesAsin || null
+    const prev = asin ? byResolvedAsin.get(asin) : null
+    if (!prev) {
+      if (asin) byResolvedAsin.set(asin, g)
+      merged.push(g)
+      continue
+    }
+    const have = new Set(prev.books.map((b) => b.asin))
+    for (const b of g.books) if (!have.has(b.asin)) prev.books.push(b)
+    prev.books.sort((a, b) => (a.num ?? 99) - (b.num ?? 99))
+    prev.recency = Math.min(prev.recency, g.recency)
+    prev.total = prev.total || g.total
+    prev.seriesAsin = asin
+    if (!prev.check && g.check) prev.check = g.check
+    if (prev.check?.name) prev.name = prev.check.name
+  }
+  merged.sort((a, b) => a.recency - b.recency)
+  return merged
 }
 
 // Re-annotate cached series volumes against the *current* library + overrides.
