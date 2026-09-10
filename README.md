@@ -114,6 +114,13 @@ with the token), and the phone exchanges it for a long-lived cookie — no
 sign-in after that. "Add to Home Screen" gives an app-like launch.
 Regenerating the token revokes every device.
 
+> **Re-authorizing an installed PWA:** an installed PWA keeps a separate
+> cookie jar from the browser, so re-scanning the QR in the browser won't
+> re-authorize the PWA. If the PWA shows "Not authorized on this device",
+> open **Remote access** in the desktop app, copy the **Access token**, and
+> paste it into the token field the PWA shows — it re-sets the cookie in the
+> PWA's own jar.
+
 With [Tailscale](https://tailscale.com) installed, one button runs
 `tailscale serve` to add a stable `https://…ts.net` address that works from
 anywhere on your tailnet (and only your tailnet) with a trusted certificate —
