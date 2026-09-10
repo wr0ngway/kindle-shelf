@@ -22,9 +22,7 @@ if (!window.kindle) {
   async function call(path, opts) {
     const res = await fetch(path, opts)
     if (res.status === 401) {
-      document.body.innerHTML =
-        '<div style="font-family:system-ui;padding:2rem"><h2>Kindle Shelf</h2>' +
-        '<p>This device is no longer authorized. Scan the QR code from the desktop app again.</p></div>'
+      showUnauthorized()
       throw new Error('unauthorized')
     }
     if (!res.ok) {
@@ -33,6 +31,55 @@ if (!window.kindle) {
       throw new Error(msg)
     }
     return res.json()
+  }
+
+  // Installed PWAs keep a separate cookie jar from the browser, so scanning
+  // the QR in the browser never re-authorizes the PWA. Offer a token-input
+  // form instead: the desktop panel shows the token, and pasting it here
+  // re-sets the cookie in this device's own jar.
+  function showUnauthorized() {
+    const root = document.createElement('div')
+    root.style.cssText = 'font-family:system-ui;padding:2rem;max-width:30rem'
+    root.innerHTML =
+      '<h2>Kindle Shelf</h2>' +
+      '<p>This device is no longer authorized.</p>' +
+      '<p>In the Kindle Shelf desktop app, open <b>Remote access</b> and copy the ' +
+      '<b>Access token</b>. Paste it below to re-authorize this device.</p>'
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.placeholder = 'Paste the access token'
+    input.style.cssText = 'width:100%;padding:.5rem;margin:.5rem 0;box-sizing:border-box'
+    const btn = document.createElement('button')
+    btn.textContent = 'Authorize'
+    btn.style.cssText = 'padding:.5rem 1rem'
+    const status = document.createElement('p')
+    btn.addEventListener('click', async () => {
+      const token = input.value.trim()
+      if (!token) return
+      btn.disabled = true
+      btn.textContent = 'Authorizing…'
+      try {
+        const r = await fetch('/api/authorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+        if (r.ok) {
+          status.textContent = '✓ Authorized — reloading…'
+          setTimeout(() => location.reload(), 800)
+        } else {
+          status.textContent = 'Invalid token. Check the desktop app and try again.'
+          btn.disabled = false
+          btn.textContent = 'Authorize'
+        }
+      } catch {
+        status.textContent = 'Could not reach the desktop app. Is it running?'
+        btn.disabled = false
+        btn.textContent = 'Authorize'
+      }
+    })
+    root.append(input, btn, status)
+    document.body.replaceChildren(root)
   }
 
   const post = (path, body) =>

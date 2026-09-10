@@ -739,6 +739,10 @@ function renderTailscaleSection(body, st) {
     'The Wi-Fi address above only works at home. Tailscale (free for personal use) adds a ' +
     'private HTTPS address that works from anywhere — three steps:'))
 
+  if (ts.state === 'error' && ts.detail) {
+    body.append(el('p', 'summary', `⚠️ Tailscale detection failed: ${ts.detail}`))
+  }
+
   // Step 1: install on this computer
   const installed = Boolean(ts.installed)
   if (installed) {
