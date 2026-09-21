@@ -140,6 +140,8 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 0.75rem;
 }
 .series-group h3 button { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+.series-group.archived { opacity: 0.55; }
+.series-group.archived h3 { border-bottom-style: dashed; }
 
 .mark-btn {
   font-size: 0.72rem;
@@ -176,6 +178,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .badge.preorder { background: #fee2e2; color: #991b1b; }
 .badge.ku-avail { background: transparent; color: #1e40af; border-color: #1e40af; }
 .badge.progress { background: transparent; color: var(--muted); border-color: var(--border); }
+.badge.archived { background: #e5e7eb; color: #374151; }
 @media (prefers-color-scheme: dark) {
   .badge.owned { background: #14532d; color: #bbf7d0; }
   .badge.ku-active { background: #1e3a8a; color: #bfdbfe; }
@@ -183,6 +186,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   .badge.unread { background: #78350f; color: #fde68a; }
   .badge.preorder { background: #7f1d1d; color: #fecaca; }
   .badge.ku-avail { color: #93c5fd; border-color: #93c5fd; }
+  .badge.archived { background: #374151; color: #d1d5db; }
 }
 
 #details {

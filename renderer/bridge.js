@@ -103,6 +103,7 @@ if (!window.kindle) {
     seriesCheck: (key, opts) => post('/api/series-check', { key, force: Boolean(opts?.force) }),
     authorCatalog: (name, opts) => post('/api/author', { name, force: Boolean(opts?.force) }),
     setOverride: (asin, value) => post('/api/override', { asin, value }),
+    setArchived: (ref, archived) => post('/api/archive', { ref, archived: Boolean(archived) }),
     scanStart: () => post('/api/scan-start'),
     scanStop: () => post('/api/scan-stop'),
     // Remote management is desktop-only; renderer hides the button when absent.

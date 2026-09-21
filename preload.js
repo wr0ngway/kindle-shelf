@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('kindle', {
   seriesCheck: (key, opts) => ipcRenderer.invoke('series:check', key, opts),
   authorCatalog: (name, opts) => ipcRenderer.invoke('author:catalog', name, opts),
   setOverride: (asin, value) => ipcRenderer.invoke('override:set', asin, value),
+  setArchived: (ref, archived) => ipcRenderer.invoke('archive:set', ref, archived),
   scanStart: () => ipcRenderer.invoke('scan:start'),
   scanStop: () => ipcRenderer.invoke('scan:stop'),
   remoteStatus: () => ipcRenderer.invoke('remote:status'),
