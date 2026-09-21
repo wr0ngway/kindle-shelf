@@ -6,6 +6,7 @@ const BADGE_LABELS = {
   'ku-returned': 'KU · returned',
   unread: 'Not read',
   preorder: 'Not yet released',
+  archived: 'Archived',
 }
 
 const state = {
@@ -38,7 +39,7 @@ function refreshUi() {
 
 // ---------- persisted controls ----------
 
-const PERSISTED_CONTROLS = ['lib-sort', 'group-series', 'lib-compact', 'lib-unread-only', 'lib-released-only']
+const PERSISTED_CONTROLS = ['lib-sort', 'group-series', 'lib-compact', 'lib-unread-only', 'lib-released-only', 'lib-show-archived']
 
 function restoreControls() {
   for (const id of PERSISTED_CONTROLS) {
@@ -210,6 +211,35 @@ function checkButton(g) {
   return btn
 }
 
+// Identifiers sent to the archive store. The key can shift as metadata
+// resolves a series name, so the ASIN is carried whenever it's known.
+function seriesRef(g) {
+  return {
+    key: g.key,
+    seriesAsin: g.seriesAsin || g.check?.seriesAsin || null,
+    name: g.check?.name || g.name,
+  }
+}
+
+async function toggleArchived(g) {
+  await window.kindle.setArchived(seriesRef(g), !g.archived)
+  state.seriesGroups = await window.kindle.seriesGroups()
+  renderLibrary()
+}
+
+function archiveButton(g) {
+  const btn = el('button', 'archive-btn', g.archived ? 'Unarchive' : 'Archive')
+  btn.title = g.archived
+    ? 'Show this series in the list again'
+    : 'Hide this series until you want it back'
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    btn.disabled = true
+    await toggleArchived(g)
+  })
+  return btn
+}
+
 // ---------- views ----------
 
 function showView(name) {
@@ -266,6 +296,7 @@ function renderLibraryGrouped(wrap, matches) {
   const compact = $('lib-compact').checked
   const unreadOnly = $('lib-unread-only').checked
   const releasedOnly = $('lib-released-only').checked
+  const showArchived = $('lib-show-archived').checked
   const recentFirst = $('lib-sort').value === 'recent'
   const matchAsins = new Set(matches.map((b) => b.asin))
   const byAsin = new Map(state.books.map((b) => [b.asin, b]))
@@ -280,6 +311,8 @@ function renderLibraryGrouped(wrap, matches) {
   let checked = 0
   for (const g of sorted) {
     if (g.check) checked++
+    // Archiving is a series-list concern: hidden unless you ask to see it.
+    if (g.archived && !showArchived) continue
     const members = g.books.map((b) => byAsin.get(b.asin)).filter(Boolean)
     const nameMatch = !q || (g.check?.name || g.name).toLowerCase().includes(q)
     if (!nameMatch && !members.some((b) => matchAsins.has(b.asin))) continue
@@ -325,7 +358,10 @@ function renderLibraryGrouped(wrap, matches) {
       head.append(' ')
       head.append(btn)
     }
+    if (g.archived) head.append(' ', badge('archived'))
+    head.append(' ', archiveButton(g))
     sec.append(head)
+    if (g.archived) sec.classList.add('archived')
 
     if (!compact) for (const b of members) sec.append(bookRow(b))
     if (next && next.length) {
@@ -824,6 +860,7 @@ $('group-series').addEventListener('change', renderLibrary)
 $('lib-compact').addEventListener('change', renderLibrary)
 $('lib-unread-only').addEventListener('change', renderLibrary)
 $('lib-released-only').addEventListener('change', renderLibrary)
+$('lib-show-archived').addEventListener('change', renderLibrary)
 $('refresh').addEventListener('click', () => {
   if (state.scanning) window.kindle.scanStop()
   else window.kindle.sync()

@@ -65,8 +65,10 @@ page is fetched from Amazon automatically in the background after every sync
 (first launch scans everything), listing unread volumes inline (*Released
 only* on by default so pre-orders don't clutter); *Only series with unread
 books* narrows to series you're behind on, and *Compact* hides your own
-books to leave just the what-to-read-next queue. Series checks cache for a
-week; the header ↻ Refresh re-syncs and re-scans (and stops a running scan);
+books to leave just the what-to-read-next queue. *Archive* (on any series
+header) sets a series aside so it leaves the list until *Show archived* brings
+it back — for series you're done with but might revisit. Series checks cache for
+a week; the header ↻ Refresh re-syncs and re-scans (and stops a running scan);
 per-series ↻ re-checks one series.
 Control states persist across launches — "group + compact + recent + unread
 only" is the reading-queue view. Badges: *Owned*, *Kindle Unlimited* (active
@@ -144,7 +146,8 @@ server fronts your Amazon session. LAN + Tailscale is the intended posture.
 `probe.js` and `test-parse.js` run one-off fetches/parses against the live
 session (`npx electron probe.js`) — useful when Amazon changes page shapes.
 `test-browser.js` simulates a phone browser against the remote server;
-`gen-icons.js` regenerates the PWA icons.
+`gen-icons.js` regenerates the PWA icons. `test-archive.js` exercises the
+archived-series matching logic with plain `node test-archive.js`.
 
 ## Caveats
 

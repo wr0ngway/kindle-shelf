@@ -8,6 +8,7 @@ const {
   createAmazon, decodeEntities, splitAuthors, guessSeries, seriesKey, USER_AGENT,
 } = require('./lib/amazon')
 const { createRemoteServer } = require('./lib/server')
+const { setArchived, isArchived, reconcileArchived } = require('./lib/archive')
 const tailscale = require('./lib/tailscale')
 
 // Same data dir in dev and packaged builds (packaged would otherwise derive
@@ -248,6 +249,32 @@ function setOverride(asin, value) {
   fs.writeFileSync(overridesFile(), JSON.stringify(ov, null, 1))
   return ov
 }
+// Archived series (asin/key -> record): temporarily hidden from the grouped
+// list, reversible. Match/upgrade logic lives in lib/archive.js.
+const archivedFile = () => path.join(app.getPath('userData'), 'archived.json')
+function loadArchived() {
+  try {
+    return JSON.parse(fs.readFileSync(archivedFile(), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+function saveArchived(map) {
+  fs.writeFileSync(archivedFile(), JSON.stringify(map, null, 1))
+}
+function applyArchived(ref, archived) {
+  const next = setArchived(loadArchived(), ref, archived)
+  saveArchived(next)
+  return next
+}
+// Both identifiers matter: the key can shift as metadata resolves a series
+// name, and the ASIN isn't known until the series page has been scanned.
+const seriesRef = (g) => ({
+  key: g.key,
+  seriesAsin: g.seriesAsin || g.check?.seriesAsin || null,
+  name: g.check?.name || g.name,
+})
+
 // Push a read/unread mark to Amazon itself (same record the Kindle apps and
 // Content & Devices use). Throws if Amazon rejects it.
 async function updateAmazonReadState(asin, read, retry = true) {
@@ -420,6 +447,12 @@ function computeSeriesGroups() {
     if (prev.check?.name) prev.name = prev.check.name
   }
   merged.sort((a, b) => a.recency - b.recency)
+
+  // Resolve archived flags (and opportunistically upgrade key-only records now
+  // that series ASINs may have resolved).
+  const { map: archive, changed } = reconcileArchived(loadArchived(), merged.map(seriesRef))
+  if (changed) saveArchived(archive)
+  for (const g of merged) g.archived = isArchived(archive, seriesRef(g))
   return merged
 }
 
@@ -764,6 +797,10 @@ const remoteApi = {
   'POST /api/series-check': ({ body }) => checkSeries(body.key, { force: Boolean(body.force) }),
   'POST /api/author': ({ body }) => authorCatalog(body.name, { force: Boolean(body.force) }),
   'POST /api/override': ({ body }) => applyOverride(body.asin, body.value ?? null),
+  'POST /api/archive': ({ body }) => {
+    applyArchived(body.ref, Boolean(body.archived))
+    return { ok: true }
+  },
 }
 
 async function startRemote() {
@@ -843,6 +880,10 @@ async function remoteStatus() {
 ipcMain.handle('books:get', () => annotateBooks(loadBooks()))
 ipcMain.handle('version:get', () => app.getVersion())
 ipcMain.handle('override:set', (_e, asin, value) => applyOverride(asin, value))
+ipcMain.handle('archive:set', (_e, ref, archived) => {
+  applyArchived(ref, Boolean(archived))
+  return { ok: true }
+})
 ipcMain.handle('remote:status', () => remoteStatus())
 ipcMain.handle('remote:set', async (_e, enabled) => {
   if (enabled) await startRemote()
